@@ -23,22 +23,34 @@ app.name = 'API TinchoDev';
 app.use(morgan('dev'));
 app.use(cookieParser());
 app.use(express.json());
+const allowedOrigins = ['https://tinchodev.it.com', 'http://localhost:3000'];
+
 app.use(
   cors({
-    origin: process.env.URL_ASSESS,
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) === -1) {
+        const msg = 'El CORS policy para este sitio no permite acceder desde ' + origin;
+        return callback(new Error(msg), false);
+      }
+      return callback(null, true);
+    },
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type'],
   })
 );
+
 app.use(express.urlencoded({ extended: true }));
 
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', process.env.URL_ASSESS);
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   next();
 });
-
+app.get('/', (req, res) => {
+  res.status(200).send('hellor, weldome my server the my porfolio.');
+});
 app.use('/', routes);
 app.get('/api/whatsapp/qr', getWhatsAppQR);
 
