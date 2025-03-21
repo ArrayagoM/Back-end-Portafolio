@@ -51,7 +51,7 @@ app.use((req, res, next) => {
 app.get('/', (req, res) => {
   res.status(200).send('hellor, weldome my server the my porfolio.');
 });
-app.use('/', routes);
+app.use('/api', routes);
 app.get('/api/whatsapp/qr', getWhatsAppQR);
 
 app.get('/oauth2callback', async (req, res) => {
