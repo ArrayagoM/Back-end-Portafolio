@@ -4,3 +4,5 @@ node_modules
 tmp
 .wwebjs_cache
 session
+src/services/transcribe.py
+src/services/temp_audio.ogg
