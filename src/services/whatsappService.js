@@ -22,36 +22,36 @@ const conversationStates = {};
 // Función stub para transcribir audio
 // Función para transcribir el audio de WhatsApp usando el script Python
 // Función para transcribir el audio
-async function transcribeAudio(msg) {
-  console.log('Transcribiendo audio con OpenAI...');
+// async function transcribeAudio(msg) {
+//   console.log('Transcribiendo audio con OpenAI...');
 
-  // Descarga el audio desde WhatsApp
-  const media = await msg.downloadMedia();
-  if (!media) {
-    throw new Error('No se pudo descargar el audio.');
-  }
+//   // Descarga el audio desde WhatsApp
+//   const media = await msg.downloadMedia();
+//   if (!media) {
+//     throw new Error('No se pudo descargar el audio.');
+//   }
 
-  // Guarda el audio en un archivo temporal. IMPORTANTE: el archivo debe estar en formato WAV
-  const tempAudioPath = path.join(__dirname, 'temp_audio.wav'); // Aquí guardas el archivo como temp_audio.wav
-  fs.writeFileSync(tempAudioPath, Buffer.from(media.data, 'base64'));
+//   // Guarda el audio en un archivo temporal. IMPORTANTE: el archivo debe estar en formato WAV
+//   const tempAudioPath = path.join(__dirname, 'temp_audio.wav'); // Aquí guardas el archivo como temp_audio.wav
+//   fs.writeFileSync(tempAudioPath, Buffer.from(media.data, 'base64'));
 
-  return new Promise((resolve, reject) => {
-    // Llama al script Python que procesa el audio descargado
-    const scriptPath = path.join(__dirname, 'transcribe.py');
-    exec(`python3 "${scriptPath}" "${tempAudioPath}"`, (err, stdout, stderr) => {
-      // Borra el archivo temporal después de la transcripción
-      fs.unlinkSync(tempAudioPath);
-      if (err) {
-        console.error('Error ejecutando transcribe.py:', err);
-        return reject(err);
-      }
-      // stdout contendrá la transcripción y los prints de [DEBUG], por lo que puedes extraer la última línea
-      const lines = stdout.trim().split('\n');
-      const transcription = lines[lines.length - 1];
-      resolve(transcription);
-    });
-  });
-}
+//   return new Promise((resolve, reject) => {
+//     // Llama al script Python que procesa el audio descargado
+//     const scriptPath = path.join(__dirname, 'transcribe.py');
+//     exec(`python3 "${scriptPath}" "${tempAudioPath}"`, (err, stdout, stderr) => {
+//       // Borra el archivo temporal después de la transcripción
+//       fs.unlinkSync(tempAudioPath);
+//       if (err) {
+//         console.error('Error ejecutando transcribe.py:', err);
+//         return reject(err);
+//       }
+//       // stdout contendrá la transcripción y los prints de [DEBUG], por lo que puedes extraer la última línea
+//       const lines = stdout.trim().split('\n');
+//       const transcription = lines[lines.length - 1];
+//       resolve(transcription);
+//     });
+//   });
+// }
 
 class WhatsAppService {
   constructor() {
