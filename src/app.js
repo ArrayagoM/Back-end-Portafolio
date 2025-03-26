@@ -28,14 +28,14 @@ const allowedOrigins = ['https://tinchodev.it.com', 'http://localhost:3000'];
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
+      if (!origin) return callback(null, true); // Para aceptar conexiones sin origen (local)
       if (allowedOrigins.indexOf(origin) === -1) {
         const msg = 'El CORS policy para este sitio no permite acceder desde ' + origin;
         return callback(new Error(msg), false);
       }
       return callback(null, true);
     },
-    methods: ['GET', 'POST'],
+    methods: ['GET', 'POST', 'DELETE'], // Permite DELETE también
     allowedHeaders: ['Content-Type'],
   })
 );
