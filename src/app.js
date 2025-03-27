@@ -28,7 +28,7 @@ const allowedOrigins = ['https://tinchodev.it.com', 'http://localhost:3000'];
 app.use(
   cors({
     origin: '*', // Permitir todos los orígenes
-    methods: ['GET', 'POST', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     allowedHeaders: ['Content-Type'],
   })
 );
