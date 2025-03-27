@@ -116,10 +116,15 @@ const crearCita = async (req, res) => {
               <h1>¡Cita Confirmada!</h1>
               <p>Hola <strong>${name}</strong>,</p>
               <p>Tu cita está confirmada para el <strong>${fecha}</strong> a las <strong>${hora}</strong>.</p>
-              <p>Accede a tu cita mediante el siguiente enlace:</p>
+              <p>Accede a tu cita mediante los siguientes enlaces:</p>
               <p>
                 <a href="${eventResponse.data.hangoutLink}" class="btn-cta" target="_blank">
                   Unirse a Google Meet
+                </a>
+              </p>
+              <p>
+                <a href="${eventResponse.data.htmlLink}" class="btn-cta" target="_blank">
+                  Ver en Google Calendar
                 </a>
               </p>
               <p>Gracias por confiar en nosotros.</p>
@@ -136,13 +141,29 @@ const crearCita = async (req, res) => {
           html: userEmailHtml,
         });
 
-        // Mensaje de WhatsApp con el enlace de Google Meet
-        const whatsappMessage = `¡Hola ${name}! 🙌\n\nTu cita está confirmada para el ${fecha} a las ${hora}. Aquí tienes el enlace de Google Meet: ${eventResponse.data.hangoutLink}.\n\n¡Saludos! 🚀😃`;
+        // Mensaje de WhatsApp mejorado, con enlaces y menú de opciones
+        const whatsappMessage = `¡Hola ${name}! 🙌
+
+Tu cita está confirmada para el ${fecha} a las ${hora}.
+
+Aquí tienes dos enlaces importantes:
+• Únete a tu reunión en Google Meet: ${eventResponse.data.hangoutLink}
+• Consulta los detalles de tu cita en Google Calendar: ${eventResponse.data.htmlLink}
+
+*Menú de Opciones:*
+1. Escribe *AGENDAR* para programar una nueva cita.
+2. Escribe *PRESUPUESTO* para obtener el presupuesto de un proyecto.
+3. Escribe *MÁS* para recibir más información sobre nuestros servicios.
+
+¡Gracias por confiar en nosotros y nos vemos en tu cita! 🚀😃`;
+
+        // Enviar el mensaje de WhatsApp
         await WhatsAppService.sendMessage(phoneNumber, whatsappMessage);
 
         adminNotificationMessage += `
           <p><strong>Estado:</strong> Agendado en Google Calendar</p>
-          <p><strong>Enlace:</strong> <a href="${eventResponse.data.hangoutLink}">${eventResponse.data.hangoutLink}</a></p>
+          <p><strong>Enlace Meet:</strong> <a href="${eventResponse.data.hangoutLink}">${eventResponse.data.hangoutLink}</a></p>
+          <p><strong>Enlace Calendar:</strong> <a href="${eventResponse.data.htmlLink}">${eventResponse.data.htmlLink}</a></p>
         `;
       } catch (error) {
         console.error('Error al crear el evento en Google Calendar:', error);
@@ -183,17 +204,16 @@ const crearCita = async (req, res) => {
         html: userContactEmailHtml,
       });
 
-      const whatsappMenuMessage = 
-      `¡Hola ${name}! 🙌
-      
-      Hemos recibido tu mensaje y nos pondremos en contacto a la brevedad.
-      
-      Si deseas agendar una cita ahora mismo, responde con *AGENDAR*.
-      Si prefieres que te contactemos sin agendar, no es necesario responder.
-      
-      ¡Gracias por escribirnos! 😊`;
-            await WhatsAppService.sendMessage(phoneNumber, whatsappMenuMessage);
-   
+      const whatsappMenuMessage = `¡Hola ${name}! 🙌
+
+Hemos recibido tu mensaje y nos pondremos en contacto a la brevedad.
+
+Si deseas agendar una cita ahora mismo, responde con *AGENDAR*.
+Si prefieres que te contactemos sin agendar, no es necesario responder.
+
+¡Gracias por escribirnos! 😊`;
+      await WhatsAppService.sendMessage(phoneNumber, whatsappMenuMessage);
+
       adminNotificationMessage += `<p><strong>Estado:</strong> Mensaje de contacto sin cita</p>`;
     }
 
