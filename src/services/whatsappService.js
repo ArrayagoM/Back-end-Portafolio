@@ -60,6 +60,7 @@ class WhatsAppService {
 
     this.client.on('message', async (msg) => {
       try {
+        if (msg.from.endsWith('@g.us')) return;
         const phone = msg.from;
         let incomingText = msg.body ? msg.body.trim() : '';
         const text = incomingText.toLowerCase();
@@ -257,10 +258,12 @@ class WhatsAppService {
             `🛍️ *TIENDA ONLINE* - ¡Excelente elección! 💻\n\n` +
             `Nuestros paquetes incluyen:\n` +
             `• Catálogo de productos\n` +
-            `• Carrito de compras\n` +
-            `• Pasarela de pagos\n` +
-            `• Panel administrativo\n\n` +
+            `• Creació y carga de nuevo productos\n` +
+            `• Crear productos %OFF/ super%OFF/ Liquidación\n` +
+            `• Redirecionamiento A WhatsApp Bussiness\n` +
+            `• Panel administrativo Donde se puede crear, editar y elimiinar los productos\n\n` +
             `💰 *Desde $350 USD*\n\n` +
+            `💰 *Aquí un ejemplo de lado del cliente https://vercel.com/teamsgamers/client-tu-y-yo *\n\n` +
             `¿Qué prefieres?\n1. Paquete básico\n2. Solución personalizada\n3. Comparar opciones\n\n` +
             `Responde con el número o "no sé" para ayuda.`,
 
