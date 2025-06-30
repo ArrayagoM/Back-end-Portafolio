@@ -1,22 +1,14 @@
 const { google } = require('googleapis');
 const moment = require('moment-timezone');
 const sendEmail = require('../config/nodemailer');
-const WhatsAppService = require('../services/whatsappService');
+const Token = require('../models/Token')
+// const WhatsAppService = require('../services/whatsappService');
 const Client = require('../models/Cliente');
 const OAuth2 = google.auth.OAuth2;
-
-const oauth2Client = new OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.REDIRECT_URL
-);
-oauth2Client.setCredentials({ refresh_token: process.env.REFRESH_TOKEN });
-const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
 const crearCita = async (req, res) => {
   try {
     console.log(req.body);
-    // Desestructuramos y "limpiamos" posibles espacios en blanco
     let { name, email, phoneNumber, message, hora, fecha, agendarEnGoogle, phoneCode } = req.body;
     name = name.trim();
     email = email.trim();
@@ -31,21 +23,10 @@ const crearCita = async (req, res) => {
       return res.status(400).json({ message: 'El email no es válido' });
     }
 
-    console.log('Número completo:', phoneNumber);
-
-    // Validamos que tenga el formato + seguido de 8 a 15 dígitos
-    const phoneRegex = /^\+\d{10,15}$/;
-    if (!phoneRegex.test(phoneNumber)) {
-      return res.status(400).json({
-        message: 'El número de teléfono no es válido',
-      });
-    }
-
     if (message.length < 10) {
       return res.status(400).json({ message: 'El mensaje debe tener al menos 10 caracteres' });
     }
 
-    // Guardamos el cliente en la DB
     const newClient = new Client({ name, email, phoneNumber: phoneNumber, message });
     const savedClient = await newClient.save();
 
@@ -53,7 +34,6 @@ const crearCita = async (req, res) => {
       return res.status(500).json({ message: 'Error al guardar en la base de datos' });
     }
 
-    // Preparamos la notificación para admin
     let adminNotificationMessage = `
       <h2>Nueva solicitud de contacto</h2>
       <p><strong>Nombre:</strong> ${name}</p>
@@ -62,12 +42,25 @@ const crearCita = async (req, res) => {
       <p><strong>Mensaje:</strong> ${message}</p>
     `;
 
-    // Definimos la URL de tu logo (puede venir de una variable de entorno)
     const logoUrl =
       process.env.LOGO_URL || 'https://tinchodev.it.com/static/media/logo.194f9768dd3fb4b97f76.png';
 
     if (agendarEnGoogle) {
-      // Convertir la fecha y hora a un objeto Date en la zona horaria correcta
+      // 🔁 Nuevo bloque para obtener el refresh token desde MongoDB
+      const tokenDoc = await Token.findOne();
+      if (!tokenDoc || !tokenDoc.refreshToken) {
+        return res.status(500).json({ message: 'No hay token guardado en la base de datos' });
+      }
+
+      const oauth2Client = new OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        process.env.REDIRECT_URL
+      );
+
+      oauth2Client.setCredentials({ refresh_token: tokenDoc.refreshToken });
+      const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
       const startDateTime = moment.tz(`${fecha} ${hora}`, 'America/Cancun').toDate();
       const endDateTime = moment(startDateTime).add(1, 'hour').toDate();
 
@@ -95,7 +88,6 @@ const crearCita = async (req, res) => {
           conferenceDataVersion: 1,
         });
 
-        // Plantilla de email para cita agendada
         const userEmailHtml = `
           <!DOCTYPE html>
           <html lang="es">
@@ -134,31 +126,11 @@ const crearCita = async (req, res) => {
           </html>
         `;
 
-        // Enviar email al usuario con la confirmación de la cita
         await sendEmail({
           to: email,
           subject: 'Cita confirmada',
           html: userEmailHtml,
         });
-
-        // Mensaje de WhatsApp mejorado, con enlaces y menú de opciones
-        const whatsappMessage = `¡Hola ${name}! 🙌
-
-Tu cita está confirmada para el ${fecha} a las ${hora}.
-
-Aquí tienes dos enlaces importantes:
-• Únete a tu reunión en Google Meet: ${eventResponse.data.hangoutLink}
-• Consulta los detalles de tu cita en Google Calendar: ${eventResponse.data.htmlLink}
-
-*Menú de Opciones:*
-1. Escribe *AGENDAR* para programar una nueva cita.
-2. Escribe *PRESUPUESTO* para obtener el presupuesto de un proyecto.
-3. Escribe *MÁS* para recibir más información sobre nuestros servicios.
-
-¡Gracias por confiar en nosotros y nos vemos en tu cita! 🚀😃`;
-
-        // Enviar el mensaje de WhatsApp
-        await WhatsAppService.sendMessage(phoneNumber, whatsappMessage);
 
         adminNotificationMessage += `
           <p><strong>Estado:</strong> Agendado en Google Calendar</p>
@@ -167,12 +139,9 @@ Aquí tienes dos enlaces importantes:
         `;
       } catch (error) {
         console.error('Error al crear el evento en Google Calendar:', error);
-        return res
-          .status(500)
-          .json({ success: false, error: 'Error al crear el evento en Google Calendar' });
+        return res.status(500).json({ success: false, error: 'Error al crear el evento en Google Calendar' });
       }
     } else {
-      // Si es solo un mensaje de contacto, enviamos una plantilla diferente
       const userContactEmailHtml = `
         <!DOCTYPE html>
         <html lang="es">
@@ -204,20 +173,9 @@ Aquí tienes dos enlaces importantes:
         html: userContactEmailHtml,
       });
 
-      const whatsappMenuMessage = `¡Hola ${name}! 🙌
-
-Hemos recibido tu mensaje y nos pondremos en contacto a la brevedad.
-
-Si deseas agendar una cita ahora mismo, responde con *AGENDAR*.
-Si prefieres que te contactemos sin agendar, no es necesario responder.
-
-¡Gracias por escribirnos! 😊`;
-      await WhatsAppService.sendMessage(phoneNumber, whatsappMenuMessage);
-
       adminNotificationMessage += `<p><strong>Estado:</strong> Mensaje de contacto sin cita</p>`;
     }
 
-    // Enviar notificación al administrador con un email personalizado
     await sendEmail({
       to: 'jarrayago@abc.gob.ar',
       subject: 'Nueva solicitud de contacto',
