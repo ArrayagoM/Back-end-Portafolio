@@ -23,7 +23,7 @@ connectDB()
       // Inicializar el servicio de WhatsApp y asignarlo a app.locals
       console.log(`Servidor escuchando en:`);
       console.log(`→ http://localhost:${port}`);
-      console.log(`→ http://${localIP}:${port}`);
+      // console.log(`→ http://${localIP}:${port}`);
     });
   })
   .catch((error) => {
