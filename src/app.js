@@ -31,7 +31,7 @@ const allowedOrigins = ['https://tinchodev.it.com', 'http://localhost:3000'];
 
 app.use(
   cors({
-    origin: '*', // Permitir todos los orígenes
+    origin: allowedOrigins, // Permitir todos los orígenes
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     allowedHeaders: ['Content-Type'],
   })
@@ -39,7 +39,7 @@ app.use(
 app.use(express.urlencoded({ extended: true }));
 
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigins);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   next();
