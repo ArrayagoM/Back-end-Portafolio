@@ -27,19 +27,27 @@ app.name = 'API TinchoDev';
 app.use(morgan('dev'));
 app.use(cookieParser());
 app.use(express.json());
+
 const allowedOrigins = ['https://tinchodev.it.com', 'http://localhost:3000'];
 
 app.use(
   cors({
-    origin: allowedOrigins, // Permitir todos los orígenes
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     allowedHeaders: ['Content-Type'],
   })
 );
+
 app.use(express.urlencoded({ extended: true }));
 
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', allowedOrigins);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   next();
