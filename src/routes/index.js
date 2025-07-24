@@ -1,11 +1,12 @@
 const { Router } = require('express');
 const citaRoutes = require('./citasRoutes');
-const ProyectRoutes = require('./proyectRoutes');
+const proyectRoutes = require('./proyectRoutes');
+const reviewRoutes = require('./reviewRoutes');
 
 const routes = Router();
 
-// Usar la ruta correctamente
 routes.use('/citas', citaRoutes);
-routes.use('/proyect', ProyectRoutes);
+routes.use('/proyect', proyectRoutes);
+routes.use('/review', reviewRoutes);
 
 module.exports = routes;

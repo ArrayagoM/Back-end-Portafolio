@@ -28,36 +28,31 @@ app.use(morgan('dev'));
 app.use(cookieParser());
 app.use(express.json());
 
-const allowedOrigins = ['https://tinchodev.it.com', 'http://localhost:3000'];
-
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
-    allowedHeaders: ['Content-Type'],
-  })
-);
+app.use(cors());
 
 app.use(express.urlencoded({ extended: true }));
 
 app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
   next();
 });
+
 app.get('/', (req, res) => {
   res.status(200).send('hellor, weldome my server the my porfolio.');
 });
 
 app.use('/google', googleAuthRoutes);
-app.use('/api', routes);
+app.use(
+  '/api',
+  (req, res, next) => {
+    console.log('ruta api acansada');
+    next();
+  },
+  routes
+);
 // app.get('/api/whatsapp/qr', getWhatsAppQR);
 
 // app.get('/oauth2callback', async (req, res) => {

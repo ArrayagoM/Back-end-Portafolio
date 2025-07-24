@@ -1,32 +1,26 @@
 require('dotenv').config();
-const os = require('os');
+const routes  = require('./src/routes');
 const app = require('./src/app');
-const port = process.env.PORT || 5200;
 const { connectDB } = require('./src/config/db');
+// Importamos la función standalone
+const { seedAllData } = require('./src/controllers/reviewController');
 
-// function getLocalIP() {
-//   const interfaces = os.networkInterfaces();
-//   for (const iface of Object.values(interfaces)) {
-//     for (const config of iface) {
-//       if (config.family === 'IPv4' && !config.internal) {
-//         return config.address;
-//       }
-//     }
-//   }
-//   return '127.0.0.1';
-// }
+const port = process.env.PORT || 5200;
+
 
 connectDB()
-  .then(() => {
-    // const localIP = getLocalIP();
-    app.listen(port, async () => {
-      // Inicializar el servicio de WhatsApp y asignarlo a app.locals
-      console.log(`Servidor escuchando en:`);
-      console.log(`→ http://localhost:${port}`);
-      // console.log(`→ http://${localIP}:${port}`);
+  .then(async () => {
+    // 1) Sembramos TODAS las reviews antes de levantar el server:
+    const inserted = await seedAllData();
+    console.log(`[Reviews] Sembradas ${inserted.length} reseñas desde realisticReviews`);
+
+    // 2) Arrancamos el servidor
+    app.listen(port, () => {
+      console.log(`🔥 Server up en http://localhost:${port}`);
+      console.log(`→ GET /api/review → ahora devuelve las reviews del array`);
     });
   })
-  .catch((error) => {
-    console.error('Error al conectar con la base de datos:', error);
+  .catch(err => {
+    console.error('Error al conectar DB:', err);
     process.exit(1);
   });
