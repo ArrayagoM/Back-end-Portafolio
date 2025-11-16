@@ -6,12 +6,18 @@ mercadopago.configure({
 });
 
 const createPaymentPreference = async (ticket, buyer) => {
+  const frontendUrl = 'http://localhost:3000';
+  const backendUrl = 'http://localhost:5200';
+
+  console.log(`[MercadoPago Service] Creando preferencia de pago para el número ${ticket.number}`);
+
   const preference = {
     items: [
       {
-        title: `Número de Rifa: ${ticket.number} - Alarma de Moto`,
+        title: `Número Rifa: ${ticket.number} - Alarma Moto`,
+        description: 'Ticket para la rifa de una alarma de última generación para motocicleta',
         quantity: 1,
-        unit_price: 1500.0, // 🚨 ¡IMPORTANTE! Define aquí el precio de cada número
+        unit_price: 1500.0,
         currency_id: 'ARS',
       },
     ],
@@ -20,23 +26,29 @@ const createPaymentPreference = async (ticket, buyer) => {
       email: buyer.email,
     },
     back_urls: {
-      success: `${process.env.FRONTEND_URL}/success`, // URL a la que se redirige tras pago exitoso
-      failure: `${process.env.FRONTEND_URL}/failure`,
-      pending: `${process.env.FRONTEND_URL}/pending`,
+      success: `${frontendUrl}/success`,
+      failure: `${frontendUrl}/failure`,
+      pending: `${frontendUrl}/pending`,
     },
-    auto_return: 'approved',
-    // ¡La URL más importante! Mercado Pago nos notificará aquí sobre el estado del pago.
-    notification_url: `${process.env.BACKEND_URL}/api/raffle/webhook`,
-    // Asociamos el ID del ticket para saber cuál actualizar
+    // auto_return: 'approved', // <-- LÍNEA ELIMINADA: Esta era la causa del problema.
+    notification_url: `${backendUrl}/api/raffle/webhook`,
     external_reference: ticket._id.toString(),
   };
 
   try {
     const response = await mercadopago.preferences.create(preference);
-    return response.body; // Contiene el init_point (el link de pago)
+    console.log(`[MercadoPago Service] Preferencia creada con éxito. ID: ${response.body.id}`);
+    return response.body;
   } catch (error) {
-    console.error('Error al crear preferencia de Mercado Pago:', error);
-    throw new Error('No se pudo generar el link de pago.');
+    console.error('--- ❌ ERROR AL CREAR PREFERENCIA DE PAGO ❌ ---');
+    if (error.response) {
+      console.error('Status:', error.response.status);
+      console.error('Data:', error.response.data);
+    } else {
+      console.error('Error:', error.message);
+    }
+    console.error('----------------------------------------------------');
+    throw new Error('No se pudo generar el link de pago con Mercado Pago.');
   }
 };
 
