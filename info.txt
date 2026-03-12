@@ -1,0 +1,2474 @@
+index.js:
+require('dotenv').config();
+const routes  = require('./src/routes');
+const app = require('./src/app');
+const { connectDB } = require('./src/config/db');
+// Importamos la función standalone
+const { seedAllData } = require('./src/controllers/reviewController');
+
+const port = process.env.PORT || 5200;
+
+
+connectDB()
+  .then(async () => {
+    // 1) Sembramos TODAS las reviews antes de levantar el server:
+    const inserted = await seedAllData();
+    console.log(`[Reviews] Sembradas ${inserted.length} reseñas desde realisticReviews`);
+
+    // 2) Arrancamos el servidor
+    app.listen(port, () => {
+      console.log(`🔥 Server up en http://localhost:${port}`);
+      console.log(`→ GET /api/review → ahora devuelve las reviews del array`);
+    });
+  })
+  .catch(err => {
+    console.error('Error al conectar DB:', err);
+    process.exit(1);
+  });
+
+src/app.js:
+const express = require('express');
+const morgan = require('morgan');
+const cors = require('cors');
+const cookieParser = require('cookie-parser');
+const googleAuthRoutes = require('./routes/googleAuth');
+const axios = require('axios');
+const Token = require('./models/Token');
+const { getAuthUrl, saveRefreshToken } = require('./services/googleOAuthService');
+
+const qs = require('qs');
+
+const routes = require('./routes/index');
+// const { getWhatsAppQR } = require('./routes/WhatsAppRoutes');
+const app = express();
+
+const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const REDIRECT_URI = process.env.REDIRECT_URL;
+
+if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI) {
+  console.error('❌ Faltan variables de entorno necesarias.');
+  process.exit(1);
+}
+
+app.name = 'API TinchoDev';
+
+app.use(morgan('dev'));
+app.use(cookieParser());
+app.use(express.json());
+
+app.use(cors());
+
+app.use(express.urlencoded({ extended: true }));
+
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  next();
+});
+
+app.get('/', (req, res) => {
+  res.status(200).send('hellor, weldome my server the my porfolio.');
+});
+
+app.use('/google', googleAuthRoutes);
+app.use(
+  '/api',
+  (req, res, next) => {
+    console.log('ruta api acansada');
+    next();
+  },
+  routes
+);
+// app.get('/api/whatsapp/qr', getWhatsAppQR);
+
+// app.get('/oauth2callback', async (req, res) => {
+//   try {
+//     const code = req.query.code;
+
+//     if (!code) {
+//       console.log('❌ Código de autorización no encontrado.');
+//       return res.status(400).json({ error: 'Código de autorización no encontrado' });
+//     }
+
+//     const tokenResponse = await axios.post(
+//       'https://oauth2.googleapis.com/token',
+//       qs.stringify({
+//         code,
+//         client_id: CLIENT_ID,
+//         client_secret: CLIENT_SECRET,
+//         redirect_uri: REDIRECT_URI,
+//         grant_type: 'authorization_code',
+//       }),
+//       {
+//         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+//       }
+//     );
+
+//     const { access_token, refresh_token } = tokenResponse.data;
+
+//     if (!refresh_token) {
+//       console.log('❌ No se recibió un refresh_token.');
+//       return res.status(400).json({
+//         error:
+//           'No se recibió un refresh_token. Asegúrate de que el "access_type" sea "offline" y el "prompt" sea "consent" en la URL de autorización.',
+//       });
+//     }
+
+//     console.log('✅ Refresh token obtenido correctamente.');
+//     res.status(200).json({ access_token, refresh_token });
+//   } catch (error) {
+//     console.error('❌ Error en /oauth2callback:', error);
+//     res.status(500).json({
+//       error: 'Error al obtener el refresh token',
+//       details: error.response ? error.response.data : error.message,
+//     });
+//   }
+// });
+
+app.get('/oauth2callback', async (req, res) => {
+  console.log('🚀 Entró a /oauth2callback con query:', req.query);
+  try {
+    const { code } = req.query;
+    if (!code) {
+      console.log('❌ No se recibió código en query');
+      return res.status(400).json({ error: 'Código no recibido' });
+    }
+
+    console.log('📬 Código recibido:', code);
+    const tokens = await saveRefreshToken(code);
+    console.log('🎉 Tokens guardados:', tokens);
+
+    return res.status(200).json({
+      message: 'Refresh token guardado con éxito',
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+    });
+  } catch (err) {
+    console.error('❌ Error en /oauth2callback:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/favicon.ico', (req, res) => res.status(204));
+
+app.use((error, req, res, next) => {
+  console.error('❌ Error global:', error);
+  res.status(500).json({ message: error.message || 'Ocurrió un error inesperado' });
+});
+
+module.exports = app;
+ 
+ src/config/db.js:
+ const mongoose = require('mongoose');
+
+const connectDB = async () => {
+  try {
+    const dbURI = process.env.URL_DEPLOY;
+    if (!dbURI) {
+      throw new Error('MongoDB URI is not defined in environment variables');
+    }
+
+
+    await mongoose.connect(dbURI);
+
+  } catch (err) {
+    console.error('Error conectando a MongoDB:', err.message);
+    process.exit(1);
+  }
+};
+
+module.exports = { connectDB };
+src/config/nodemailer.js:
+const nodemailer = require('nodemailer');
+require('dotenv').config();
+
+const transporter = nodemailer.createTransport({
+  service: 'Gmail',
+  auth: {
+    user: process.env.EMAIL,
+    pass: process.env.PASSWORD_NODEMAILER,
+  },
+});
+
+const sendEmail = async ({to, subject, html}) => {
+  try {
+    const mailOptions = {
+      from: process.env.EMAIL,
+      to,
+      subject,
+      html,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log(`Correo enviado: ${info.messageId}`);
+    return info;
+  } catch (error) {
+    console.error('Error al enviar correo:', error);
+    throw error;
+  }
+};
+
+module.exports = sendEmail;
+src/controllers/ClientsController.js:
+const { google } = require('googleapis');
+const moment = require('moment-timezone');
+const sendEmail = require('../config/nodemailer');
+const Token = require('../models/Token')
+// const WhatsAppService = require('../services/whatsappService');
+const Client = require('../models/Cliente');
+const OAuth2 = google.auth.OAuth2;
+
+const crearCita = async (req, res) => {
+  try {
+    console.log(req.body);
+    let { name, email, phoneNumber, message, hora, fecha, agendarEnGoogle, phoneCode } = req.body;
+    name = name.trim();
+    email = email.trim();
+    phoneNumber = phoneNumber.trim();
+
+    if (!name || !email || !phoneNumber || !message || !phoneCode) {
+      return res.status(400).json({ message: 'Todos los campos son obligatorios' });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ message: 'El email no es válido' });
+    }
+
+    if (message.length < 10) {
+      return res.status(400).json({ message: 'El mensaje debe tener al menos 10 caracteres' });
+    }
+
+    const newClient = new Client({ name, email, phoneNumber: phoneNumber, message });
+    const savedClient = await newClient.save();
+
+    if (!savedClient) {
+      return res.status(500).json({ message: 'Error al guardar en la base de datos' });
+    }
+
+    let adminNotificationMessage = `
+      <h2>Nueva solicitud de contacto</h2>
+      <p><strong>Nombre:</strong> ${name}</p>
+      <p><strong>Email:</strong> ${email}</p>
+      <p><strong>Teléfono:</strong> ${phoneNumber}</p>
+      <p><strong>Mensaje:</strong> ${message}</p>
+    `;
+
+    const logoUrl =
+      process.env.LOGO_URL || 'https://tinchodev.it.com/static/media/logo.194f9768dd3fb4b97f76.png';
+
+    if (agendarEnGoogle) {
+      // 🔁 Nuevo bloque para obtener el refresh token desde MongoDB
+      const tokenDoc = await Token.findOne();
+      if (!tokenDoc || !tokenDoc.refreshToken) {
+        return res.status(500).json({ message: 'No hay token guardado en la base de datos' });
+      }
+
+      const oauth2Client = new OAuth2(
+        process.env.GOOGLE_CLIENT_ID,
+        process.env.GOOGLE_CLIENT_SECRET,
+        process.env.REDIRECT_URL
+      );
+
+      oauth2Client.setCredentials({ refresh_token: tokenDoc.refreshToken });
+      const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
+      const startDateTime = moment.tz(`${fecha} ${hora}`, 'America/Cancun').toDate();
+      const endDateTime = moment(startDateTime).add(1, 'hour').toDate();
+
+      const event = {
+        summary: `Cita con ${name}`,
+        start: { dateTime: startDateTime, timeZone: 'America/Cancun' },
+        end: { dateTime: endDateTime, timeZone: 'America/Cancun' },
+        colorId: '10',
+        conferenceData: {
+          createRequest: { requestId: new Date().toISOString() },
+        },
+        reminders: {
+          useDefault: false,
+          overrides: [
+            { method: 'email', minutes: 60 },
+            { method: 'popup', minutes: 10 },
+          ],
+        },
+      };
+
+      try {
+        const eventResponse = await calendar.events.insert({
+          calendarId: process.env.CALENDAR_ID,
+          resource: event,
+          conferenceDataVersion: 1,
+        });
+
+        const userEmailHtml = `
+          <!DOCTYPE html>
+          <html lang="es">
+          <head>
+            <meta charset="UTF-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+            <title>Cita Confirmada</title>
+            <style>
+              body { background-color: #f4f4f4; font-family: Arial, sans-serif; }
+              .container { background-color: #ffffff; padding: 20px; border-radius: 8px; text-align: center; }
+              .logo { width: 120px; margin-bottom: 20px; }
+              .btn-cta { display: inline-block; background-color: #ff5722; color: #ffffff; padding: 10px 20px; text-decoration: none; border-radius: 4px; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <img src="${logoUrl}" alt="Logo" class="logo" />
+              <h1>¡Cita Confirmada!</h1>
+              <p>Hola <strong>${name}</strong>,</p>
+              <p>Tu cita está confirmada para el <strong>${fecha}</strong> a las <strong>${hora}</strong>.</p>
+              <p>Accede a tu cita mediante los siguientes enlaces:</p>
+              <p>
+                <a href="${eventResponse.data.hangoutLink}" class="btn-cta" target="_blank">
+                  Unirse a Google Meet
+                </a>
+              </p>
+              <p>
+                <a href="${eventResponse.data.htmlLink}" class="btn-cta" target="_blank">
+                  Ver en Google Calendar
+                </a>
+              </p>
+              <p>Gracias por confiar en nosotros.</p>
+              <p>Saludos,<br/>El equipo de Soporte</p>
+            </div>
+          </body>
+          </html>
+        `;
+
+        await sendEmail({
+          to: email,
+          subject: 'Cita confirmada',
+          html: userEmailHtml,
+        });
+
+        adminNotificationMessage += `
+          <p><strong>Estado:</strong> Agendado en Google Calendar</p>
+          <p><strong>Enlace Meet:</strong> <a href="${eventResponse.data.hangoutLink}">${eventResponse.data.hangoutLink}</a></p>
+          <p><strong>Enlace Calendar:</strong> <a href="${eventResponse.data.htmlLink}">${eventResponse.data.htmlLink}</a></p>
+        `;
+      } catch (error) {
+        console.error('Error al crear el evento en Google Calendar:', error);
+        return res.status(500).json({ success: false, error: 'Error al crear el evento en Google Calendar' });
+      }
+    } else {
+      const userContactEmailHtml = `
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>Mensaje Recibido</title>
+          <style>
+            body { background-color: #f4f4f4; font-family: Arial, sans-serif; }
+            .container { background-color: #ffffff; padding: 20px; border-radius: 8px; text-align: center; }
+            .logo { width: 120px; margin-bottom: 20px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <img src="${logoUrl}" alt="Logo" class="logo" />
+            <h1>¡Mensaje Recibido!</h1>
+            <p>Hola <strong>${name}</strong>,</p>
+            <p>Hemos recibido tu mensaje y nos pondremos en contacto a la brevedad.</p>
+            <p>Gracias por escribirnos.</p>
+            <p>Saludos,<br/>El equipo de Soporte</p>
+          </div>
+        </body>
+        </html>
+      `;
+      await sendEmail({
+        to: email,
+        subject: 'Mensaje Recibido',
+        html: userContactEmailHtml,
+      });
+
+      adminNotificationMessage += `<p><strong>Estado:</strong> Mensaje de contacto sin cita</p>`;
+    }
+
+    await sendEmail({
+      to: 'jarrayago@abc.gob.ar',
+      subject: 'Nueva solicitud de contacto',
+      html: adminNotificationMessage,
+    });
+
+    return res.status(201).json({ success: true, message: 'Cita/Contacto creado correctamente' });
+  } catch (error) {
+    console.error('Error en crearCita:', error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+module.exports = { crearCita };
+src/ProyectController.js:
+const Proyect = require('../models/Proyect');
+
+const createProyect = async (req, res) => {
+  try {
+    const project = new Proyect({ ...req.body, createdAt: new Date(), updatedAt: new Date() });
+    await project.save();
+    res.status(200).json({ message: 'Proyecto creado con éxito', project });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al crear el proyecto', error });
+  }
+};
+
+const getProyectAll = async (req, res) => {
+  try {
+    const projects = await Proyect.find();
+    res.status(200).json({ projects });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al obtener proyectos', error });
+  }
+};
+
+const updateProyect = async (req, res) => {
+  try {
+    const project = await Proyect.findByIdAndUpdate(
+      req.params.id,
+      { ...req.body, updatedAt: new Date() },
+      { new: true }
+    );
+    res.status(200).json({ message: 'Proyecto actualizado con éxito', project });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al actualizar el proyecto', error });
+  }
+};
+
+const deleteProyect = async (req, res) => {
+  try {
+    const project = await Proyect.findById(req.params.id);
+    if (!project) {
+      return res.status(404).json({ message: 'Proyecto no encontrado' });
+    }
+    await Proyect.findByIdAndDelete(req.params.id);
+    res.status(200).json({ message: 'Proyecto eliminado con éxito' });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al eliminar el proyecto', error });
+  }
+};
+
+module.exports = {
+  createProyect,
+  getProyectAll,
+  updateProyect,
+  deleteProyect,
+};
+src/controllers/RaffleController.js:
+const RaffleTicket = require('../models/RaffleTicket');
+const { createPaymentPreference } = require('../services/mercadoPagoService');
+const sendEmail = require('../config/nodemailer');
+
+// Obtener todos los tickets
+const getTickets = async (req, res) => {
+  try {
+    const tickets = await RaffleTicket.find().select('number status -_id');
+    const soldCount = await RaffleTicket.countDocuments({ status: 'sold' });
+    res.status(200).json({
+      tickets,
+      soldCount,
+      totalCount: 10000,
+      progress: (soldCount / 10000) * 100,
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al obtener los números.' });
+  }
+};
+
+// Crear la preferencia de pago
+const createPayment = async (req, res) => {
+  const { number, name, email } = req.body;
+
+  if (!number || !name || !email) {
+    return res.status(400).json({ message: 'Faltan datos para la compra.' });
+  }
+
+  try {
+    const ticket = await RaffleTicket.findOne({ number });
+
+    if (!ticket || ticket.status !== 'available') {
+      return res.status(404).json({ message: 'Este número no está disponible.' });
+    }
+
+    // Lógica mejorada: Marcar como pendiente para evitar doble venta
+    ticket.status = 'pending';
+    ticket.buyerName = name;
+    ticket.buyerEmail = email;
+    await ticket.save();
+    console.log(`[Controller] Ticket ${number} marcado como 'pending' para ${email}.`);
+
+    const preference = await createPaymentPreference(ticket, { name, email });
+    res.status(201).json({ paymentUrl: preference.init_point });
+  } catch (error) {
+    // Si la creación de la preferencia falla, revertir el estado del ticket
+    await RaffleTicket.updateOne(
+      { number },
+      { $set: { status: 'available', buyerName: '', buyerEmail: '' } }
+    );
+    console.error(
+      `[Controller] Error creando pago para el ticket ${number}. Revertido a 'available'.`
+    );
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Webhook con lógica mejorada para manejar notificaciones de Mercado Pago
+const handleWebhook = async (req, res) => {
+  console.log('--- 🔔 WEBHOOK RECIBIDO ---');
+  console.log('Query:', req.query);
+
+  const paymentId = req.query['data.id'];
+
+  if (!paymentId) {
+    console.log('[Webhook] No se recibió un ID de pago. Ignorando.');
+    return res.sendStatus(200);
+  }
+
+  console.log(`[Webhook] Procesando notificación para Payment ID: ${paymentId}`);
+
+  try {
+    const payment = await mercadopago.payment.findById(paymentId);
+    if (!payment) {
+      console.log(`[Webhook] No se encontró información para el Payment ID: ${paymentId}`);
+      return res.sendStatus(200);
+    }
+
+    console.log('[Webhook] Detalles del pago:', {
+      status: payment.body.status,
+      external_reference: payment.body.external_reference,
+    });
+
+    const ticketId = payment.body.external_reference;
+    if (!ticketId) {
+      console.log('[Webhook] Error: El pago no tiene una `external_reference`.');
+      return res.sendStatus(200);
+    }
+
+    const ticket = await RaffleTicket.findById(ticketId);
+    if (!ticket) {
+      console.log(`[Webhook] Error: No se encontró el ticket con ID: ${ticketId}`);
+      return res.sendStatus(200);
+    }
+
+    // LÓGICA MEJORADA: Manejo de estados para evitar duplicados
+    if (ticket.status === 'sold') {
+      console.log(
+        `[Webhook] El ticket ${ticket.number} ya estaba vendido. No se realizan cambios.`
+      );
+      return res.sendStatus(200);
+    }
+
+    if (payment.body.status === 'approved') {
+      console.log(
+        `[Webhook] ✅ Pago APROBADO para el ticket ${ticket.number}. Actualizando a 'sold'.`
+      );
+      ticket.status = 'sold';
+      ticket.paymentId = paymentId;
+      await ticket.save();
+
+      const emailHtml = `...`; // Tu HTML de correo
+      await sendEmail({
+        to: ticket.buyerEmail,
+        subject: `Confirmación de tu número de rifa: ${ticket.number}`,
+        html: emailHtml,
+      });
+      console.log(`[Webhook] Correo de confirmación enviado a ${ticket.buyerEmail}.`);
+    } else if (
+      ['rejected', 'cancelled', 'refunded', 'charged_back'].includes(payment.body.status)
+    ) {
+      console.log(
+        `[Webhook] ❌ Pago RECHAZADO o CANCELADO (${payment.body.status}) para el ticket ${ticket.number}. Devolviendo a 'available'.`
+      );
+      ticket.status = 'available';
+      ticket.buyerName = '';
+      ticket.buyerEmail = '';
+      ticket.paymentId = '';
+      await ticket.save();
+    } else {
+      console.log(
+        `[Webhook] ⏳ Estado del pago no manejado: ${payment.body.status}. No se realizan cambios.`
+      );
+    }
+  } catch (error) {
+    console.error('[Webhook] ❌ Error procesando la notificación:', error);
+  }
+
+  res.sendStatus(200);
+};
+
+module.exports = { getTickets, createPayment, handleWebhook };
+src/controllers/reviewController.js:
+const axios = require('axios');
+const Review = require('../models/Review');
+const realisticReviews = require('../data/realisticReviews');
+
+/**
+ * Mezcla un array y devuelve hasta `limit` reviews para semilla
+ */
+async function seedRealisticReviews(limit = 5) {
+  try {
+    const shuffled = [...realisticReviews].sort(() => 0.5 - Math.random());
+    const toInsert = shuffled.slice(0, limit).map((review) => ({
+      ...review,
+      createdAt: new Date(Date.now() - Math.random() * 1000 * 60 * 60 * 24 * 180),
+    }));
+    return await Review.insertMany(toInsert);
+  } catch (error) {
+    console.error('Error seeding realistic reviews:', error);
+    throw error;
+  }
+}
+
+// ─── Controladores CRUD ─────────────────────────────────
+
+/** Listar todas las reseñas con filtros opcionales */
+async function getAllReviews(req, res) {
+  try {
+    const { type, minRating, verified } = req.query;
+    const filter = {};
+    if (type) filter.projectType = type;
+    if (minRating) filter.rating = { $gte: parseInt(minRating) };
+    if (verified) filter.verified = verified === 'true';
+
+    const reviews = await Review.find(filter).sort({ createdAt: -1 });
+    res.json(reviews);
+  } catch (err) {
+    res.status(500).json({ message: 'Error al obtener reseñas', error: err.message });
+  }
+}
+
+/** Crear reseña nueva (clientes reales) */
+async function createReview(req, res) {
+  try {
+    const { author, content, rating, projectType } = req.body;
+    const newReview = new Review({
+      author,
+      content,
+      rating: Math.min(Math.max(1, rating), 5),
+      projectType,
+      verified: true,
+      isFiction: false,
+    });
+    const saved = await newReview.save();
+    res.status(201).json(saved);
+  } catch (err) {
+    res.status(400).json({ message: 'Error al crear reseña', error: err.errors || err.message });
+  }
+}
+
+/** Obtener reseña por ID */
+async function getReviewById(req, res) {
+  try {
+    const review = await Review.findById(req.params.id);
+    if (!review) return res.status(404).json({ message: 'Reseña no encontrada' });
+    res.json(review);
+  } catch (err) {
+    res.status(500).json({ message: 'Error al buscar reseña', error: err.message });
+  }
+}
+
+/** Actualizar reseña por ID */
+async function updateReview(req, res) {
+  try {
+    const updated = await Review.findByIdAndUpdate(
+      req.params.id,
+      { $set: req.body },
+      { new: true, runValidators: true }
+    );
+    if (!updated) return res.status(404).json({ message: 'Reseña no encontrada' });
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ message: 'Error al actualizar reseña', error: err.message });
+  }
+}
+
+/** Borrar reseña por ID */
+async function deleteReview(req, res) {
+  try {
+    const deleted = await Review.findByIdAndDelete(req.params.id);
+    if (!deleted) return res.status(404).json({ message: 'Reseña no encontrada' });
+    res.json({ message: 'Reseña eliminada', id: req.params.id });
+  } catch (err) {
+    res.status(500).json({ message: 'Error al eliminar reseña', error: err.message });
+  }
+}
+
+// ─── Sembrado automático y estadísticas ─────────────────
+
+/** Sembrar reseñas ficticias (endpoint protegido) */
+async function seedReviews(req, res) {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 10, 100);
+    const inserted = await seedRealisticReviews(limit);
+    res.status(201).json({ success: true, inserted: inserted.length, reviews: inserted });
+  } catch (err) {
+    res
+      .status(500)
+      .json({ success: false, message: 'Error al sembrar reseñas', error: err.message });
+  }
+}
+
+async function seedAllData() {
+  // Prepara el array
+  const toInsert = realisticReviews.map((r) => ({
+    ...r,
+    createdAt: r.createdAt || new Date(Date.now() - Math.random() * 1000 * 60 * 60 * 24 * 180),
+  }));
+  // Borra antiguo y guarda todo
+  await Review.deleteMany({});
+  const inserted = await Review.insertMany(toInsert);
+  return inserted;
+}
+
+/** Auto-sembrado al iniciar la app si hay menos de `minCount` */
+async function autoSeedIfNeeded(minCount = 10) {
+  try {
+    const count = await Review.countDocuments();
+    if (count < minCount) {
+      console.log(`[Reviews] Auto-sembrando ${minCount - count} reseñas...`);
+      await seedRealisticReviews(minCount - count);
+    }
+  } catch (err) {
+    console.error('[Reviews] Error en auto-sembrado:', err);
+  }
+}
+
+/** Obtener estadísticas globales */
+async function getStats(req, res) {
+  try {
+    const stats = await Review.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          averageRating: { $avg: '$rating' },
+          verified: { $sum: { $cond: ['$verified', 1, 0] } },
+          types: { $addToSet: '$projectType' },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          total: 1,
+          averageRating: { $round: ['$averageRating', 1] },
+          verified: 1,
+          types: { $filter: { input: '$types', as: 't', cond: { $ne: ['$$t', null] } } },
+        },
+      },
+    ]);
+    res.json(stats[0] || {});
+  } catch (err) {
+    res.status(500).json({ message: 'Error al obtener estadísticas', error: err.message });
+  }
+}
+
+async function loadAllReviews(req, res) {
+  try {
+    const inserted = await seedAllData();
+    return res.status(201).json({
+      success: true,
+      inserted: inserted.length,
+      reviews: inserted,
+    });
+  } catch (err) {
+    console.error('Error cargando todas las reseñas:', err);
+    return res
+      .status(500)
+      .json({ success: false, message: 'No se pudo cargar todas las reseñas', error: err.message });
+  }
+}
+
+module.exports = {
+  getAllReviews,
+  createReview,
+  getReviewById,
+  updateReview,
+  deleteReview,
+  seedReviews,
+  autoSeedIfNeeded,
+  getStats,
+  loadAllReviews,
+  seedAllData,
+};
+src/models/Cliente.js:
+const mongoose = require('mongoose');
+
+const ClientSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String, required: true },
+  phoneNumber: { type: String, required: true },
+  message: { type: String, required: true },
+});
+const Client = mongoose.model('Clien', ClientSchema);
+
+module.exports = Client;
+src/Proyect.js:
+const mongoose = require('mongoose');
+
+const ProyectSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  type: { type: String, required: true },
+  description: { type: String, required: true },
+  technologies: { type: String, required: true },
+  images: [{ type: String, required: true }],
+  repositoryUrl: { type: String, required: true },
+  deployUrl: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now },
+  updatedAt: { type: Date, default: Date.now },
+});
+
+const Proyect = mongoose.model('Proyect', ProyectSchema);
+module.exports = Proyect;
+src/models/RaffleTicket.js:
+const mongoose = require('mongoose');
+
+const RaffleTicketSchema = new mongoose.Schema({
+  number: {
+    type: String, // Guardamos como String para mantener los ceros iniciales (ej: '0001')
+    required: true,
+    unique: true, // Cada número es único
+  },
+  status: {
+    type: String,
+    required: true,
+    enum: ['available', 'pending', 'sold'], // Estados posibles de un número
+    default: 'available',
+  },
+  buyerName: {
+    type: String,
+    default: '',
+  },
+  buyerEmail: {
+    type: String,
+    default: '',
+  },
+  paymentId: {
+    // ID de pago de Mercado Pago
+    type: String,
+    default: '',
+  },
+  orderId: {
+    // ID de la orden que generamos
+    type: String,
+    default: '',
+  },
+});
+
+const RaffleTicket = mongoose.model('RaffleTicket', RaffleTicketSchema);
+module.exports = RaffleTicket;
+src/models/Review.js:
+const mongoose = require('mongoose');
+
+const reviewSchema = new mongoose.Schema({
+  author: {
+    type: String,
+    required: true,
+    trim: true,
+  },
+  content: {
+    type: String,
+    required: true,
+  },
+  rating: {
+    type: Number,
+    min: 1,
+    max: 5,
+    required: true,
+  },
+  isFiction: {
+    type: Boolean,
+    default: true,
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
+module.exports = mongoose.model('Review', reviewSchema);
+src/models/Token.js:
+const mongoose = require('mongoose');
+
+const tokenSchema = new mongoose.Schema({
+  refreshToken: {
+    type: String,
+    required: true,
+  },
+  lastChecked: {
+    type: Date,
+    default: Date.now,
+  },
+});
+const Token = mongoose.model('Token', tokenSchema);
+module.exports = Token;
+src/routes/CitasRoutes.js:
+const mongoose = require('mongoose');
+
+const tokenSchema = new mongoose.Schema({
+  refreshToken: {
+    type: String,
+    required: true,
+  },
+  lastChecked: {
+    type: Date,
+    default: Date.now,
+  },
+});
+const Token = mongoose.model('Token', tokenSchema);
+module.exports = Token;
+src/routes/googleAuth.js:
+const express = require('express');
+const router = express.Router();
+const Token = require('../models/Token');
+const { getAuthUrl, saveRefreshToken } = require('../services/googleOAuthService');
+
+// Ruta para redirigir al usuario a Google
+router.get('/auth', async (req, res) => {
+  try {
+    const url = await getAuthUrl();
+    res.redirect(url);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Callback después de autorizar
+router.get('/oauth2callback', async (req, res) => {
+  console.log('🚀 Entró a /oauth2callback con query:', req.query);
+  try {
+    const { code } = req.query;
+    if (!code) {
+      console.log('❌ No se recibió código en query');
+      return res.status(400).json({ error: 'Código no recibido' });
+    }
+
+    console.log('📬 Código recibido:', code);
+    const tokens = await saveRefreshToken(code);
+    console.log('🎉 Tokens guardados:', tokens);
+
+    return res.status(200).json({
+      message: 'Refresh token guardado con éxito',
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+    });
+  } catch (err) {
+    console.error('❌ Error en /oauth2callback:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/tokens', async (req, res) => {
+  try {
+    const all = await Token.find();
+    res.json(all);
+  } catch (err) {
+    res.status(500).json({ error: 'No se pudieron obtener tokens' });
+  }
+});
+
+module.exports = router;
+src/routes/index.js:
+const { Router } = require('express');
+const citaRoutes = require('./citasRoutes');
+const proyectRoutes = require('./proyectRoutes');
+const reviewRoutes = require('./reviewRoutes');
+const raffleRoutes = require('./raffleRoutes');
+
+const routes = Router();
+
+routes.use('/citas', citaRoutes);
+routes.use('/proyect', proyectRoutes);
+routes.use('/review', reviewRoutes);
+routes.use('/raffle', raffleRoutes);
+
+module.exports = routes;
+src/routes/proyectRoutes.js:
+const { Router } = require('express');
+const {
+  createProyect,
+  getProyectAll,
+  updateProyect,
+  deleteProyect,
+} = require('../controllers/ProyectController');
+const route = Router();
+
+route.get('/', getProyectAll);
+route.post('/', createProyect);
+route.put('/update/:id', updateProyect);
+route.delete('/delete/:id', deleteProyect);
+
+module.exports = route;
+src/routes/raffleRoutes.js:
+const { Router } = require('express');
+const { getTickets, createPayment, handleWebhook } = require('../controllers/RaffleController');
+const route = Router();
+
+// Endpoint para que el frontend obtenga el estado de todos los números y el progreso
+route.get('/tickets', getTickets);
+
+// Endpoint para iniciar la compra de un número
+route.post('/buy', createPayment);
+
+// Endpoint que Mercado Pago usará para notificarnos (webhook)
+route.post('/webhook', handleWebhook);
+
+module.exports = route;
+src/routes/reviewRoutes.js:
+const { Router } = require('express');
+const router = Router();
+const {
+  getAllReviews,
+  createReview,
+  getReviewById,
+  updateReview,
+  deleteReview,
+  seedReviews,
+  getStats,
+} = require('../controllers/reviewController');
+
+// Listar todas
+router.get('/', getAllReviews);
+// Crear
+router.post('/', createReview);
+// Detalle por ID
+router.get('/:id', getReviewById);
+// Actualizar por ID
+router.put('/:id', updateReview);
+// Borrar por ID
+router.delete('/:id', deleteReview);
+
+// (Opcional) Sembrar reseñas IA
+router.post('/seed', seedReviews);
+
+// Estadísticas
+router.get('/stats', getStats);
+
+module.exports = router;
+src/routes/WhatsAppRoutes.js:
+// const whatsappService = require('../services/whatsappService');
+
+// exports.getWhatsAppQR = async (req, res) => {
+//   try {
+//     const status = await whatsappService.getClientStatus();
+
+//     if (status.status === 204) {
+//       return res.sendStatus(204); // Sesión activa
+//     }
+
+//     if (status.status === 200) {
+//       // Si el QR está disponible, devolvemos el QR
+//       if (status.qr) {
+//         return res.status(200).json({ qr: status.qr });
+//       } else {
+//         // Si no hay QR pero el cliente está intentando conectarse, devolvemos el mensaje de espera
+//         return res.status(200).json({ message: status.message });
+//       }
+//     }
+
+//     return res.status(500).json({ message: status.message }); // Error inesperado
+//   } catch (error) {
+//     console.error('Error en getWhatsAppQR:', error.message);
+//     return res.status(500).json({ message: 'Error al obtener el QR.' });
+//   }
+// };
+src/scripts/seedRaffle.js:
+require('dotenv').config();
+const mongoose = require('mongoose');
+const RaffleTicket = require('../models/RaffleTicket');
+
+const seedTickets = async () => {
+  try {
+    console.log('Conectando a la base de datos...');
+    await mongoose.connect(process.env.URL_DEPLOY);
+
+    console.log('Borrando números antiguos...');
+    await RaffleTicket.deleteMany({});
+
+    const tickets = [];
+    for (let i = 0; i < 9999; i++) {
+      // Formateamos el número para que tenga 4 dígitos con ceros a la izquierda
+      const number = i.toString().padStart(4, '0');
+      tickets.push({ number, status: 'available' });
+    }
+
+    console.log('Creando 9999 números de rifa...');
+    await RaffleTicket.insertMany(tickets);
+
+    console.log('✅ ¡Proceso completado! La base de datos está lista para la rifa.');
+  } catch (error) {
+    console.error('❌ Error durante el sembrado de números:', error);
+  } finally {
+    mongoose.connection.close();
+  }
+};
+
+seedTickets();
+src/services/botService.js:
+// const moment = require('moment-timezone');
+// const Proyect = require('../models/Proyect');
+
+// class BotService {
+//   constructor(whatsappService) {
+//     this.whatsapp = whatsappService;
+//     this.userSessions = {};
+//     this.conversationStates = {};
+//     this.setupSessionCleanup();
+//   }
+
+//   async handleMessage(msg) {
+//     try {
+//       // Validación básica del mensaje
+//       if (!msg || !msg.from || !msg.body) {
+//         console.warn('Mensaje inválido recibido:', msg);
+//         return;
+//       }
+
+//       const phone = msg.from;
+//       const incomingText = msg.body.trim();
+//       const text = incomingText.toLowerCase();
+//       const now = new Date();
+
+//       // Actualizar última interacción
+//       this.userSessions[phone] = now;
+
+//       // Manejar comandos principales
+//       if (await this.handleMainCommands(msg, phone, text)) return;
+
+//       // Si no hay estado previo, mostrar menú
+//       if (!this.conversationStates[phone]) {
+//         await this.showMainMenu(msg);
+//         return;
+//       }
+
+//       // Procesar conversación existente
+//       await this.processConversation(msg, phone, text, incomingText);
+//     } catch (error) {
+//       console.error('Error en BotService.handleMessage:', error);
+//       await this.sendSafeReply(
+//         msg,
+//         '⚠️ Ocurrió un error al procesar tu mensaje. Por favor intenta nuevamente o escribe *MENU* para reiniciar.'
+//       );
+//     }
+//   }
+
+//   async processConversation(msg, phone, text, incomingText) {
+//     const conv = this.conversationStates[phone];
+//     conv.lastInteraction = new Date();
+
+//     switch (conv.type) {
+//       case 'presupuesto':
+//         await this.handleBudgetFlow(msg, conv, phone, text, incomingText);
+//         break;
+//       case 'cita':
+//         await this.handleAppointmentFlow(msg, conv, phone, text, incomingText);
+//         break;
+//       default:
+//         await this.showMainMenu(msg);
+//         delete this.conversationStates[phone];
+//     }
+//   }
+
+//   async sendSafeReply(msg, content, options = {}) {
+//     try {
+//       await this.whatsapp.safeReply(msg, content, options);
+//     } catch (error) {
+//       console.error('Error crítico al enviar mensaje:', error);
+//       // Intento alternativo sin reply (solo mensaje)
+//       try {
+//         const chat = await msg.getChat();
+//         await chat.sendMessage(content);
+//       } catch (fallbackError) {
+//         console.error('Error en fallback de envío:', fallbackError);
+//       }
+//     }
+//   }
+
+//   setupSessionCleanup() {
+//     // Limpiar sesiones cada hora
+//     setInterval(() => {
+//       this.cleanOldSessions();
+//     }, 3600000);
+//   }
+
+//   async cleanOldSessions() {
+//     const now = new Date();
+//     const inactiveTime = 30 * 60 * 1000; // 30 minutos
+
+//     for (const [phone, lastInteraction] of Object.entries(this.userSessions)) {
+//       if (now - new Date(lastInteraction) > inactiveTime) {
+//         delete this.userSessions[phone];
+//         delete this.conversationStates[phone];
+//         console.log(`Sesión limpiada para ${phone}`);
+//       }
+//     }
+//   }
+
+//   async handleMainCommands(msg, phone, text) {
+//     const commandMap = {
+//       menu: () => this.showMainMenu(msg),
+//       ayuda: () => this.showHelp(msg),
+//       cancelar: () => this.cancelOperation(msg, phone),
+//       reiniciar: () => this.resetConversation(msg, phone),
+//       hola: () => this.greetUser(msg),
+//       servicios: () => this.showServices(msg),
+//       contacto: () => this.showContact(msg),
+//     };
+
+//     if (commandMap[text]) {
+//       await commandMap[text]();
+//       return true;
+//     }
+
+//     if (!this.conversationStates[phone]) {
+//       const intent = this.detectIntent(text);
+//       if (intent === 'presupuesto') {
+//         this.conversationStates[phone] = {
+//           state: 'project_selection',
+//           type: 'presupuesto',
+//           lastInteraction: new Date(),
+//         };
+//         await this.startBudgetConversation(msg);
+//         return true;
+//       }
+//       if (intent === 'cita') {
+//         this.conversationStates[phone] = {
+//           state: 'waiting_for_name',
+//           type: 'cita',
+//           lastInteraction: new Date(),
+//         };
+//         await this.sendSafeReply(
+//           msg,
+//           '📅 ¡Vamos a agendar tu cita! Por favor, dime tu nombre completo:'
+//         );
+//         return true;
+//       }
+//     }
+
+//     return false;
+//   }
+
+//   detectIntent(text) {
+//     const presupuestoWords = ['presupuesto', 'cotiz', 'precio', 'costo', 'valor', 'cuánto cuesta'];
+//     const citaWords = ['agendar', 'cita', 'reunión', 'consulta', 'asesoría'];
+
+//     if (presupuestoWords.some((word) => text.includes(word))) return 'presupuesto';
+//     if (citaWords.some((word) => text.includes(word))) return 'cita';
+//     return null;
+//   }
+
+//   async showMainMenu(msg) {
+//     const menu =
+//       `¡Hola! 👋 Soy tu asistente digital. ¿En qué puedo ayudarte?\n\n` +
+//       `🔹 *Menú Principal*:\n\n` +
+//       `1. 📅 *Agendar cita* - Escribe "agendar"\n` +
+//       `2. 💰 *Presupuesto* - Escribe "presupuesto"\n` +
+//       `3. 📋 *Nuestros servicios* - Escribe "servicios"\n` +
+//       `4. 📞 *Contacto directo* - Escribe "contacto"\n\n` +
+//       `💡 También puedes decirme directamente qué necesitas.`;
+
+//     await this.sendSafeReply(msg, menu);
+//   }
+
+//   async startBudgetConversation(msg) {
+//     await this.whatsapp.safeReply(
+//       msg,
+//       `🌟 ¡Perfecto! Vamos a crear tu presupuesto personalizado. 🚀\n\n` +
+//         `📌 *Primero dime qué tipo de proyecto necesitas:*\n\n` +
+//         `1️⃣ 🛍️ E-commerce/Tienda online\n` +
+//         `2️⃣ 📱 Aplicación móvil\n` +
+//         `3️⃣ 🤖 IoT/Robótica\n` +
+//         `4️⃣ 🌐 Sitio web corporativo\n` +
+//         `5️⃣ 🧠 Sistema personalizado\n` +
+//         `6️⃣ ❓ No estoy seguro/Ayúdame\n\n` +
+//         `💡 Responde con el número o nombre del proyecto.`
+//     );
+//   }
+
+//   async handleBudgetFlow(msg, conv, phone, text, incomingText) {
+//     conv.lastInteraction = new Date();
+
+//     const projectOptions = {
+//       1: 'ecommerce',
+//       ecommerce: 'ecommerce',
+//       tienda: 'ecommerce',
+//       online: 'ecommerce',
+//       comercio: 'ecommerce',
+//       venta: 'ecommerce',
+//       2: 'app_movil',
+//       app: 'app_movil',
+//       móvil: 'app_movil',
+//       movil: 'app_movil',
+//       aplicacion: 'app_movil',
+//       celular: 'app_movil',
+//       3: 'iot',
+//       robotica: 'iot',
+//       robótica: 'iot',
+//       arduino: 'iot',
+//       sensores: 'iot',
+//       raspberry: 'iot',
+//       4: 'web',
+//       sitio: 'web',
+//       página: 'web',
+//       pagina: 'web',
+//       landing: 'web',
+//       corporativo: 'web',
+//       5: 'sistema',
+//       personalizado: 'sistema',
+//       software: 'sistema',
+//       programa: 'sistema',
+//       6: 'indeciso',
+//       'no sé': 'indeciso',
+//       'no se': 'indeciso',
+//       ayuda: 'indeciso',
+//       indeciso: 'indeciso',
+//     };
+
+//     if (conv.state === 'project_selection') {
+//       const selectedProject = projectOptions[text.toLowerCase()];
+
+//       if (selectedProject) {
+//         conv.projectType = selectedProject;
+//         conv.state = `${selectedProject}_details`;
+
+//         const projectMessages = {
+//           ecommerce:
+//             `🛍️ *TIENDA ONLINE* - ¡Excelente elección! 💻\n\n` +
+//             `Nuestros paquetes incluyen:\n` +
+//             `• Catálogo de productos\n` +
+//             `• Carrito de compras\n` +
+//             `• Pasarela de pagos\n` +
+//             `• Panel administrativo\n\n` +
+//             `💰 *Desde $350 USD*\n\n` +
+//             `¿Qué prefieres?\n1. Paquete básico\n2. Solución personalizada\n3. Comparar opciones\n\n` +
+//             `Responde con el número o "no sé" para ayuda.`,
+
+//           app_movil:
+//             `📱 *APLICACIÓN MÓVIL* - El futuro en tus manos! 📲\n\n` +
+//             `Primero necesito saber:\n` +
+//             `• ¿Para qué plataforma? (iOS, Android o ambas)\n` +
+//             `• ¿Tienes backend existente? 🖥️\n` +
+//             `• Funcionalidades clave (ej: GPS, cámara, pagos)\n\n` +
+//             `💡 *Ejemplo de respuesta:* "Android, sin backend, necesita GPS y Facebook Login"`,
+
+//           indeciso:
+//             `🤔 *NO ESTOY SEGURO* - ¡No hay problema! ✨\n\n` +
+//             `Responde estas preguntas:\n` +
+//             `1. ¿Qué problema quieres resolver?\n` +
+//             `2. ¿Quiénes usarán tu solución?\n` +
+//             `3. ¿Tienes algún plazo especial?\n\n` +
+//             `💭 *Ejemplo:* "Quiero ayudar a pequeños negocios a vender en línea antes de Navidad"`,
+//         };
+
+//         await this.whatsapp.safeReply(
+//           msg,
+//           projectMessages[selectedProject] ||
+//             `🔧 *PROYECTO PERSONALIZADO* - ¡Vamos a crearlo juntos! 🛠️\n\n` +
+//               `Por favor describe:\n` +
+//               `• 3 funcionalidades principales\n` +
+//               `• Público objetivo\n` +
+//               `• Plazo estimado\n\n` +
+//               `✏️ *Ejemplo:* "Sistema de reservas con calendario, pagos online y notificaciones SMS para hoteles pequeños"`
+//         );
+//       } else {
+//         await this.whatsapp.safeReply(
+//           msg,
+//           `⚠️ No reconocí tu respuesta. Por favor elige:\n\n` +
+//             `1. E-commerce\n2. App móvil\n3. IoT/Robótica\n4. Sitio web\n5. Sistema personalizado\n6. No estoy seguro\n\n` +
+//             `O dime "ayuda" si necesitas orientación.`
+//         );
+//       }
+//       return;
+//     }
+
+//     // Resto de los estados del flujo de presupuesto...
+//     // [Implementar según necesidad]
+//   }
+
+//   async handleAppointmentFlow(msg, conv, phone, text, incomingText) {
+//     conv.lastInteraction = new Date();
+
+//     if (conv.state === 'waiting_for_name') {
+//       if (incomingText.length < 3) {
+//         await this.whatsapp.safeReply(
+//           msg,
+//           'El nombre parece muy corto. Por favor ingresa tu nombre completo:'
+//         );
+//         return;
+//       }
+//       conv.name = incomingText;
+//       conv.state = 'waiting_for_email';
+//       await this.whatsapp.safeReply(
+//         msg,
+//         `Gracias ${incomingText}. Ahora necesito tu email para la confirmación:`
+//       );
+//       return;
+//     }
+
+//     if (conv.state === 'waiting_for_email') {
+//       if (!incomingText.includes('@') || !incomingText.includes('.')) {
+//         await this.whatsapp.safeReply(
+//           msg,
+//           'El email no parece válido. Por favor ingresa un email correcto:'
+//         );
+//         return;
+//       }
+//       conv.email = incomingText;
+//       conv.state = 'waiting_for_datetime';
+//       await this.whatsapp.safeReply(
+//         msg,
+//         `Perfecto. Ahora indícame la fecha y hora para la cita:\n\n` +
+//           `Puedes usar formatos como:\n` +
+//           `• "15/03 a las 3pm"\n` +
+//           `• "2025-03-15 15:00"\n` +
+//           `• "próximo lunes a las 10"\n\n` +
+//           `💡 Horario de atención: Lunes a Viernes 9am - 6pm`
+//       );
+//       return;
+//     }
+
+//     if (conv.state === 'waiting_for_datetime') {
+//       const dateTime = this.parseDateTime(incomingText);
+//       if (!dateTime || !dateTime.isValid()) {
+//         await this.whatsapp.safeReply(
+//           msg,
+//           `No pude entender la fecha/hora. Por favor usa formatos como:\n` +
+//             `• "15/03 a las 3pm"\n` +
+//             `• "2025-03-15 15:00"\n` +
+//             `• "próximo lunes a las 10"`
+//         );
+//         return;
+//       }
+
+//       if (
+//         dateTime.hour() < 9 ||
+//         dateTime.hour() >= 18 ||
+//         dateTime.day() === 0 ||
+//         dateTime.day() === 6
+//       ) {
+//         await this.whatsapp.safeReply(
+//           msg,
+//           `⚠️ Solo agendamos citas de Lunes a Viernes entre 9am y 6pm.\n` +
+//             `Por favor elige otro horario:`
+//         );
+//         return;
+//       }
+
+//       conv.dateTime = dateTime;
+//       conv.state = 'waiting_for_confirmation';
+//       await this.whatsapp.safeReply(
+//         msg,
+//         `¿Confirmas la cita para el ${dateTime.format('dddd D [de] MMMM [a las] HH:mm')}?\n\n` +
+//           `Responde *CONFIRMAR* para agendar o *CAMBIO* para modificar.`
+//       );
+//       return;
+//     }
+
+//     if (conv.state === 'waiting_for_confirmation') {
+//       if (text.includes('confirmar') || text === 'si') {
+//         try {
+//           const eventDetails = {
+//             summary: `Cita con ${conv.name}`,
+//             description: `Contacto: ${conv.email}\nAgendado por WhatsApp`,
+//             startDateTime: conv.dateTime.toISOString(),
+//             endDateTime: conv.dateTime.clone().add(1, 'hour').toISOString(),
+//           };
+
+//           await this.whatsapp.handleCalendarEvent(eventDetails);
+
+//           await this.whatsapp.safeReply(
+//             msg,
+//             `✅ *¡CITA AGENDADA CON ÉXITO!*\n\n` +
+//               `📅 *Fecha:* ${conv.dateTime.format('dddd D [de] MMMM')}\n` +
+//               `⏰ *Hora:* ${conv.dateTime.format('HH:mm')}\n\n` +
+//               `📩 Recibirás un correo de confirmación con los detalles.\n` +
+//               `🔔 Te avisaremos 1 día y 30 minutos antes.\n\n` +
+//               `¿Necesitas algo más?`
+//           );
+//           delete this.conversationStates[phone];
+//         } catch (error) {
+//           console.error('Error al agendar cita:', error);
+//           await this.whatsapp.safeReply(
+//             msg,
+//             `⚠️ Hubo un error al agendar tu cita. Por favor intenta nuevamente o contáctanos directamente.`
+//           );
+//         }
+//       } else {
+//         conv.state = 'waiting_for_datetime';
+//         await this.whatsapp.safeReply(msg, `Indícame la nueva fecha y hora que prefieras:`);
+//       }
+//       return;
+//     }
+//   }
+
+//   parseDateTime(text) {
+//     try {
+//       const formats = [
+//         'DD/MM [a las] HH:mm',
+//         'DD/MM [a las] h:mm a',
+//         'YYYY-MM-DD HH:mm',
+//         'YYYY-MM-DD h:mm a',
+//         'dddd [a las] HH:mm',
+//         'dddd [a las] h:mm a',
+//       ];
+
+//       const date = moment(text, formats, 'es');
+//       if (date.isValid()) return date;
+
+//       if (text.includes('próximo') || text.includes('proximo')) {
+//         const cleanText = text.replace('próximo', '').replace('proximo', '').trim();
+//         return moment().add(1, 'week').startOf('week').day(cleanText);
+//       }
+
+//       return null;
+//     } catch (error) {
+//       console.error('Error parseando fecha:', error);
+//       return null;
+//     }
+//   }
+
+//   async showHelp(msg) {
+//     await this.whatsapp.safeReply(
+//       msg,
+//       `🆘 *CENTRO DE AYUDA*\n\n` +
+//         `Puedes usar estos comandos:\n\n` +
+//         `• *menu* - Ver opciones principales\n` +
+//         `• *presupuesto* - Solicitar cotización\n` +
+//         `• *agendar* - Programar una cita\n` +
+//         `• *cancelar* - Detener acción actual\n` +
+//         `• *reiniciar* - Comenzar desde cero\n\n` +
+//         `¿En qué más puedo ayudarte?`
+//     );
+//   }
+
+//   async cancelOperation(msg, phone) {
+//     delete this.conversationStates[phone];
+//     await this.whatsapp.safeReply(
+//       msg,
+//       `Operación cancelada. ¿En qué más puedo ayudarte? Escribe *MENU* para ver opciones.`
+//     );
+//   }
+
+//   async resetConversation(msg, phone) {
+//     delete this.conversationStates[phone];
+//     await this.whatsapp.safeReply(msg, `Conversación reiniciada. ¿Cómo puedo ayudarte hoy?`);
+//     await this.showMainMenu(msg);
+//   }
+
+//   async greetUser(msg) {
+//     await this.whatsapp.safeReply(
+//       msg,
+//       `¡Hola! 👋 ¿En qué puedo ayudarte hoy? Escribe *MENU* para ver opciones.`
+//     );
+//   }
+// }
+
+// module.exports = BotService;
+src/services/googleOAuthService:
+const { google } = require('googleapis');
+require('dotenv').config();
+const mongoose = require('mongoose');
+const Token = require('../models/Token');
+
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  process.env.REDIRECT_URL
+);
+
+// 🛠 Generar URL para autorización
+async function getAuthUrl() {
+  const url = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: ['https://www.googleapis.com/auth/calendar.events'],
+    prompt: 'consent',
+  });
+  console.log('🌐 URL de autorización generada:', url);
+  return url;
+}
+
+// 💾 Guardar refresh_token en Mongo
+async function saveRefreshToken(code) {
+  try {
+    console.log('⚙️ Obteniendo tokens con código:', code);
+
+    // Paso 1: Obtener tokens
+    const { tokens } = await oauth2Client.getToken(code);
+    console.log('🎟️ Tokens recibidos de Google:', tokens);
+
+    if (!tokens.refresh_token) {
+      console.log('❌ No se recibió refresh_token.');
+      throw new Error('No se recibió refresh_token');
+    }
+
+    console.log('🧼 Eliminando tokens antiguos...');
+    const deleted = await Token.deleteMany();
+    console.log(`🧹 Se eliminaron ${deleted.deletedCount} tokens previos.`);
+
+    console.log('📥 Preparando nuevo token para guardar:', {
+      refreshToken: tokens.refresh_token,
+      lastChecked: new Date(),
+    });
+
+    // Paso 2: Guardar en Mongo
+    const saved = await Token.create({
+      refreshToken: tokens.refresh_token,
+      lastChecked: new Date(),
+    });
+
+    console.log('✅ Token guardado en Mongo correctamente:');
+    console.log(saved);
+
+    // Paso 3: Verificar que existe en la base
+    const verify = await Token.findOne();
+    if (verify) {
+      console.log('🔍 Token encontrado en la base de datos:');
+      console.log(`🧾 refreshToken: ${verify.refreshToken}`);
+      console.log(`🕒 lastChecked: ${verify.lastChecked}`);
+    } else {
+      console.log('🚨 ERROR: el token no se encuentra en la base de datos.');
+    }
+
+    return tokens;
+  } catch (err) {
+    console.error('❌ Error en saveRefreshToken:', err.message);
+    console.error(err.stack);
+    throw err;
+  }
+}
+
+// 🔁 Obtener cliente OAuth válido, actualizando si hace falta
+async function getOAuthClientWithValidToken() {
+  try {
+    console.log('🔐 Buscando refresh_token en la base de datos...');
+
+    const tokenDoc = await Token.findOne();
+
+    if (!tokenDoc) throw new Error('No hay refresh_token almacenado en Mongo');
+
+    console.log('🔑 Refresh token actual:', tokenDoc.refreshToken);
+
+    oauth2Client.setCredentials({ refresh_token: tokenDoc.refreshToken });
+
+    console.log('♻️ Solicitando nuevo access_token desde Google...');
+    const { credentials } = await oauth2Client.refreshAccessToken();
+
+    if (credentials.refresh_token && credentials.refresh_token !== tokenDoc.refreshToken) {
+      console.log('🆕 Google devolvió nuevo refresh_token. Actualizando DB...');
+      tokenDoc.refreshToken = credentials.refresh_token;
+    }
+
+    tokenDoc.lastChecked = new Date();
+    await tokenDoc.save();
+
+    console.log('✅ Cliente OAuth listo con access_token actualizado.');
+    return oauth2Client;
+  } catch (err) {
+    console.error('❌ Error en getOAuthClientWithValidToken:', err.message);
+    throw err;
+  }
+}
+
+module.exports = {
+  getAuthUrl,
+  saveRefreshToken,
+  getOAuthClientWithValidToken,
+};
+src/services/mercadoPagoService:
+const mercadopago = require('mercadopago');
+
+// Configura tus credenciales
+mercadopago.configure({
+  access_token: process.env.MERCADOPAGO_ACCESS_TOKEN,
+});
+
+const createPaymentPreference = async (ticket, buyer) => {
+  const frontendUrl = 'http://localhost:3000';
+  const backendUrl = 'http://localhost:5200';
+
+  console.log(`[MercadoPago Service] Creando preferencia de pago para el número ${ticket.number}`);
+
+  const preference = {
+    items: [
+      {
+        title: `Número Rifa: ${ticket.number} - Alarma Moto`,
+        description: 'Ticket para la rifa de una alarma de última generación para motocicleta',
+        quantity: 1,
+        unit_price: 1500.0,
+        currency_id: 'ARS',
+      },
+    ],
+    payer: {
+      name: buyer.name,
+      email: buyer.email,
+    },
+    back_urls: {
+      success: `${frontendUrl}/success`,
+      failure: `${frontendUrl}/failure`,
+      pending: `${frontendUrl}/pending`,
+    },
+    // auto_return: 'approved', // <-- LÍNEA ELIMINADA: Esta era la causa del problema.
+    notification_url: `${backendUrl}/api/raffle/webhook`,
+    external_reference: ticket._id.toString(),
+  };
+
+  try {
+    const response = await mercadopago.preferences.create(preference);
+    console.log(`[MercadoPago Service] Preferencia creada con éxito. ID: ${response.body.id}`);
+    return response.body;
+  } catch (error) {
+    console.error('--- ❌ ERROR AL CREAR PREFERENCIA DE PAGO ❌ ---');
+    if (error.response) {
+      console.error('Status:', error.response.status);
+      console.error('Data:', error.response.data);
+    } else {
+      console.error('Error:', error.message);
+    }
+    console.error('----------------------------------------------------');
+    throw new Error('No se pudo generar el link de pago con Mercado Pago.');
+  }
+};
+
+module.exports = { createPaymentPreference };
+src/services/whatsappService:
+// const { Client, LocalAuth } = require('whatsapp-web.js');
+// const path = require('path');
+// const QRCode = require('qrcode');
+// const moment = require('moment-timezone');
+// const { google } = require('googleapis');
+// const OAuth2 = google.auth.OAuth2;
+
+// // Configuración de Google Calendar
+// const oauth2Client = new OAuth2(
+//   process.env.GOOGLE_CLIENT_ID,
+//   process.env.GOOGLE_CLIENT_SECRET,
+//   process.env.REDIRECT_URL
+// );
+// oauth2Client.setCredentials({ refresh_token: process.env.REFRESH_TOKEN });
+// const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
+// // Objeto para manejar el estado de las conversaciones
+// const conversationStates = {};
+
+// class WhatsAppService {
+//   constructor() {
+//     this.lastQR = null;
+//     this.isReady = false;
+//     this.userSessions = {};
+
+//     this.client = new Client({
+//       authStrategy: new LocalAuth({
+//         clientId: 'cliente-1',
+//         dataPath: path.join(__dirname, '../../tmp/.wwebjs_auth'),
+//       }),
+//       puppeteer: {
+//         headless: true,
+//         args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+//       },
+//     });
+
+//     this.initializeClient();
+//   }
+
+//   initializeClient() {
+//     this.client.on('qr', (qr) => {
+//       this.isReady = false;
+//       this.lastQR = qr;
+//       console.log('Nuevo QR generado');
+//     });
+
+//     this.client.on('ready', () => {
+//       this.isReady = true;
+//       this.lastQR = null;
+//       console.log('Cliente de WhatsApp listo');
+//     });
+
+//     this.client.on('disconnected', (reason) => {
+//       console.log(`Cliente desconectado: ${reason}`);
+//       this.isReady = false;
+//       setTimeout(() => {
+//         this.client.initialize();
+//       }, 5000);
+//     });
+
+//     this.client.on('message', async (msg) => {
+//       try {
+//         if (msg.from.endsWith('@g.us')) return;
+//         const phone = msg.from;
+//         let incomingText = msg.body ? msg.body.trim() : '';
+//         const text = incomingText.toLowerCase();
+//         const now = new Date();
+
+//         // Actualizar última interacción
+//         this.userSessions[phone] = now;
+
+//         // Limpieza de sesiones antiguas
+//         this.cleanOldSessions();
+
+//         // Detección de comandos principales
+//         if (await this.handleMainCommands(msg, phone, text)) return;
+
+//         // Si no hay estado previo, mostrar menú
+//         if (!conversationStates[phone]) {
+//           await this.showMainMenu(msg);
+//           return;
+//         }
+
+//         // Procesar conversación existente
+//         const conv = conversationStates[phone];
+
+//         // Flujo para presupuestos
+//         if (conv.type === 'presupuesto') {
+//           await this.handleBudgetFlow(msg, conv, phone, text, incomingText);
+//           return;
+//         }
+
+//         // Flujo para citas
+//         if (conv.type === 'cita') {
+//           await this.handleAppointmentFlow(msg, conv, phone, text, incomingText);
+//           return;
+//         }
+//       } catch (error) {
+//         console.error('Error en el manejo del mensaje:', error);
+//       }
+//     });
+
+//     this.client.initialize().catch((err) => console.error('Error al inicializar:', err));
+//   }
+
+//   async cleanOldSessions() {
+//     const now = new Date();
+//     for (const [phone, lastInteraction] of Object.entries(this.userSessions)) {
+//       if (now - lastInteraction > 30 * 60 * 1000) {
+//         // 30 minutos de inactividad
+//         delete this.userSessions[phone];
+//         delete conversationStates[phone];
+//       }
+//     }
+//   }
+
+//   async handleMainCommands(msg, phone, text) {
+//     // Comandos que pueden interrumpir cualquier flujo
+//     const interruptCommands = {
+//       menu: () => this.showMainMenu(msg),
+//       ayuda: () => this.showHelp(msg),
+//       cancelar: () => this.cancelOperation(msg, phone),
+//       reiniciar: () => this.resetConversation(msg, phone),
+//       hola: () => this.greetUser(msg),
+//     };
+
+//     for (const [cmd, handler] of Object.entries(interruptCommands)) {
+//       if (text === cmd) {
+//         await handler();
+//         return true;
+//       }
+//     }
+
+//     // Detección de intenciones principales
+//     if (!conversationStates[phone]) {
+//       const intent = this.detectIntent(text);
+//       if (intent === 'presupuesto') {
+//         conversationStates[phone] = {
+//           state: 'project_selection',
+//           type: 'presupuesto',
+//           lastInteraction: new Date(),
+//         };
+//         await this.startBudgetConversation(msg);
+//         return true;
+//       }
+//       if (intent === 'cita') {
+//         conversationStates[phone] = {
+//           state: 'waiting_for_name',
+//           type: 'cita',
+//           lastInteraction: new Date(),
+//         };
+//         await msg.reply('📅 ¡Vamos a agendar tu cita! Por favor, dime tu nombre completo:');
+//         return true;
+//       }
+//     }
+
+//     return false;
+//   }
+
+//   detectIntent(text) {
+//     const presupuestoWords = ['presupuesto', 'cotiz', 'precio', 'costo', 'valor', 'cuánto cuesta'];
+//     const citaWords = ['agendar', 'cita', 'reunión', 'consulta', 'asesoría'];
+
+//     if (presupuestoWords.some((word) => text.includes(word))) return 'presupuesto';
+//     if (citaWords.some((word) => text.includes(word))) return 'cita';
+//     return null;
+//   }
+
+//   async showMainMenu(msg) {
+//     await msg.reply(
+//       `¡Hola! 👋 Soy tu asistente digital. ¿En qué puedo ayudarte?\n\n` +
+//         `🔹 *Menú Principal*:\n\n` +
+//         `1. 📅 *Agendar cita* - Escribe "agendar"\n` +
+//         `2. 💰 *Presupuesto* - Escribe "presupuesto"\n` +
+//         `3. 📋 *Nuestros servicios* - Escribe "servicios"\n` +
+//         `4. 📞 *Contacto directo* - Escribe "contacto"\n\n` +
+//         `💡 También puedes decirme directamente qué necesitas, como:\n` +
+//         `- "Quiero un presupuesto para una app móvil"\n` +
+//         `- "Necesito agendar una cita para mañana"`
+//     );
+//   }
+
+//   async startBudgetConversation(msg) {
+//     await msg.reply(
+//       `🌟 ¡Perfecto! Vamos a crear tu presupuesto personalizado. 🚀\n\n` +
+//         `📌 *Primero dime qué tipo de proyecto necesitas:*\n\n` +
+//         `1️⃣ 🛍️ E-commerce/Tienda online\n` +
+//         `2️⃣ 📱 Aplicación móvil\n` +
+//         `3️⃣ 🤖 IoT/Robótica\n` +
+//         `4️⃣ 🌐 Sitio web corporativo\n` +
+//         `5️⃣ 🧠 Sistema personalizado\n` +
+//         `6️⃣ ❓ No estoy seguro/Ayúdame\n\n` +
+//         `💡 Responde con el número o nombre del proyecto.`
+//     );
+//   }
+
+//   async handleBudgetFlow(msg, conv, phone, text, incomingText) {
+//     conv.lastInteraction = new Date();
+
+//     // Mapeo de opciones de proyecto mejorado
+//     const projectOptions = {
+//       // E-commerce
+//       1: 'ecommerce',
+//       ecommerce: 'ecommerce',
+//       tienda: 'ecommerce',
+//       online: 'ecommerce',
+//       comercio: 'ecommerce',
+//       venta: 'ecommerce',
+
+//       // App móvil
+//       2: 'app_movil',
+//       app: 'app_movil',
+//       móvil: 'app_movil',
+//       movil: 'app_movil',
+//       aplicacion: 'app_movil',
+//       celular: 'app_movil',
+
+//       // IoT/Robótica
+//       3: 'iot',
+//       robotica: 'iot',
+//       robótica: 'iot',
+//       arduino: 'iot',
+//       sensores: 'iot',
+//       raspberry: 'iot',
+
+//       // Sitio web
+//       4: 'web',
+//       sitio: 'web',
+//       página: 'web',
+//       pagina: 'web',
+//       landing: 'web',
+//       corporativo: 'web',
+
+//       // Sistema personalizado
+//       5: 'sistema',
+//       personalizado: 'sistema',
+//       software: 'sistema',
+//       programa: 'sistema',
+
+//       // No está seguro
+//       6: 'indeciso',
+//       'no sé': 'indeciso',
+//       'no se': 'indeciso',
+//       ayuda: 'indeciso',
+//       indeciso: 'indeciso',
+//     };
+
+//     if (conv.state === 'project_selection') {
+//       const selectedProject = projectOptions[text.toLowerCase()];
+
+//       if (selectedProject) {
+//         conv.projectType = selectedProject;
+//         conv.state = `${selectedProject}_details`;
+
+//         // Mensajes específicos para cada tipo de proyecto
+//         const projectMessages = {
+//           ecommerce:
+//             `🛍️ *TIENDA ONLINE* - ¡Excelente elección! 💻\n\n` +
+//             `Nuestros paquetes incluyen:\n` +
+//             `• Catálogo de productos\n` +
+//             `• Creació y carga de nuevo productos\n` +
+//             `• Crear productos %OFF/ super%OFF/ Liquidación\n` +
+//             `• Redirecionamiento A WhatsApp Bussiness\n` +
+//             `• Panel administrativo Donde se puede crear, editar y elimiinar los productos\n\n` +
+//             `💰 *Desde $350 USD*\n\n` +
+//             `💰 *Aquí un ejemplo de lado del cliente https://vercel.com/teamsgamers/client-tu-y-yo *\n\n` +
+//             `¿Qué prefieres?\n1. Paquete básico\n2. Solución personalizada\n3. Comparar opciones\n\n` +
+//             `Responde con el número o "no sé" para ayuda.`,
+
+//           app_movil:
+//             `📱 *APLICACIÓN MÓVIL* - El futuro en tus manos! 📲\n\n` +
+//             `Primero necesito saber:\n` +
+//             `• ¿Para qué plataforma? (iOS, Android o ambas)\n` +
+//             `• ¿Tienes backend existente? 🖥️\n` +
+//             `• Funcionalidades clave (ej: GPS, cámara, pagos)\n\n` +
+//             `💡 *Ejemplo de respuesta:* "Android, sin backend, necesita GPS y Facebook Login"`,
+
+//           indeciso:
+//             `🤔 *NO ESTOY SEGURO* - ¡No hay problema! ✨\n\n` +
+//             `Responde estas preguntas:\n` +
+//             `1. ¿Qué problema quieres resolver?\n` +
+//             `2. ¿Quiénes usarán tu solución?\n` +
+//             `3. ¿Tienes algún plazo especial?\n\n` +
+//             `💭 *Ejemplo:* "Quiero ayudar a pequeños negocios a vender en línea antes de Navidad"`,
+//         };
+
+//         await msg.reply(
+//           projectMessages[selectedProject] ||
+//             `🔧 *PROYECTO PERSONALIZADO* - ¡Vamos a crearlo juntos! 🛠️\n\n` +
+//               `Por favor describe:\n` +
+//               `• 3 funcionalidades principales\n` +
+//               `• Público objetivo\n` +
+//               `• Plazo estimado\n\n` +
+//               `✏️ *Ejemplo:* "Sistema de reservas con calendario, pagos online y notificaciones SMS para hoteles pequeños"`
+//         );
+//       } else {
+//         await msg.reply(
+//           `⚠️ No reconocí tu respuesta. Por favor elige:\n\n` +
+//             `1. E-commerce\n2. App móvil\n3. IoT/Robótica\n4. Sitio web\n5. Sistema personalizado\n6. No estoy seguro\n\n` +
+//             `O dime "ayuda" si necesitas orientación.`
+//         );
+//       }
+//       return;
+//     }
+
+//     // Estados específicos para cada tipo de proyecto
+//     if (conv.state === 'ecommerce_details') {
+//       if (['1', 'basico', 'básico', 'paquete'].includes(text.toLowerCase())) {
+//         conv.package = 'basic';
+//         conv.state = 'ecommerce_basic_details';
+//         await msg.reply(
+//           `🛒 *PAQUETE BÁSICO E-COMMERCE* - Buena elección! ✅\n\n` +
+//             `💰 *Inversión:* $350 USD\n` +
+//             `⏱️ *Tiempo estimado:* 2-3 semanas\n\n` +
+//             `📌 *Para finalizar, necesito saber:*\n\n` +
+//             `1. ¿Ya tienes dominio y hosting? (SI/NO)\n` +
+//             `2. ¿Necesitas diseño de logo? (SI/NO)\n` +
+//             `3. ¿Tienes imágenes de productos? (SI/NO)\n\n` +
+//             `💡 *Ejemplo de respuesta:* "SI, NO, SI"`
+//         );
+//       } else if (['2', 'personalizado', 'personalizada'].includes(text.toLowerCase())) {
+//         conv.package = 'custom';
+//         conv.state = 'ecommerce_custom_details';
+//         await msg.reply(
+//           `🔧 *E-COMMERCE PERSONALIZADO* - ¡Vamos a crear algo único! 🎨\n\n` +
+//             `Por favor describe:\n` +
+//             `1. Número estimado de productos\n` +
+//             `2. Métodos de pago necesarios\n` +
+//             `3. Integraciones especiales (ERP, CRM, etc.)\n` +
+//             `4. Requerimientos de diseño\n\n` +
+//             `✏️ *Ejemplo:* "200 productos, PayPal y tarjetas, conexión con QuickBooks, diseño minimalista"`
+//         );
+//       } else {
+//         await msg.reply(
+//           `No entendí tu respuesta. Por favor elige:\n` +
+//             `1. Paquete básico ($350)\n` +
+//             `2. Solución personalizada\n` +
+//             `3. Comparar opciones\n\n` +
+//             `O escribe "cancelar" para volver al menú.`
+//         );
+//       }
+//       return;
+//     }
+
+//     if (conv.state === 'ecommerce_basic_details') {
+//       const responses = incomingText.split(',').map((r) => r.trim().toLowerCase());
+//       if (
+//         responses.length !== 3 ||
+//         !['si', 'no'].includes(responses[0]) ||
+//         !['si', 'no'].includes(responses[1]) ||
+//         !['si', 'no'].includes(responses[2])
+//       ) {
+//         await msg.reply(
+//           `⚠️ Formato incorrecto. Por favor responde las 3 preguntas con SI/NO separadas por comas.\n\n` +
+//             `*Ejemplo:* "SI, NO, SI"`
+//         );
+//         return;
+//       }
+
+//       const [hasDomain, needsLogo, hasProductsImages] = responses;
+//       let extras = [];
+//       let total = 350;
+
+//       if (hasDomain === 'no') {
+//         extras.push('Registro de dominio (+$15/año)');
+//         total += 15;
+//       }
+//       if (needsLogo === 'si') {
+//         extras.push('Diseño de logo básico (+$50)');
+//         total += 50;
+//       }
+//       if (hasProductsImages === 'no') {
+//         extras.push('Sesión fotográfica básica (+$100)');
+//         total += 100;
+//       }
+
+//       let replyMsg =
+//         `📝 *RESUMEN DE TU COTIZACIÓN* 🧾\n\n` +
+//         `🛒 *Paquete Básico E-commerce*\n` +
+//         `• Precio base: $350 USD\n`;
+
+//       if (extras.length > 0) {
+//         replyMsg +=
+//           `\n🔹 *Extras incluidos:*\n${extras.map((e) => `• ${e}`).join('\n')}\n\n` +
+//           `💵 *Total estimado:* $${total} USD\n`;
+//       } else {
+//         replyMsg += `\n• No se agregaron extras\n` + `💵 *Total:* $350 USD\n`;
+//       }
+
+//       replyMsg +=
+//         `⏳ *Tiempo estimado:* ${extras.length > 0 ? '3-4' : '2-3'} semanas\n\n` +
+//         `¿Todo parece correcto? (Responde *CONFIRMAR* o *AJUSTAR*)`;
+
+//       await msg.reply(replyMsg);
+//       conv.state = 'ecommerce_confirmation';
+//       conv.quoteDetails = { total, extras };
+//       return;
+//     }
+
+//     if (conv.state === 'ecommerce_confirmation') {
+//       if (text.includes('confirmar') || text === 'si') {
+//         await msg.reply(
+//           `🎉 *¡COTIZACIÓN CONFIRMADA!* 🎊\n\n` +
+//             `📌 *Próximos pasos:*\n` +
+//             `1. Un asesor te contactará en menos de 2 horas\n` +
+//             `2. Recibirás un cuestionario de requisitos\n` +
+//             `3. Programaremos reunión de inicio\n\n` +
+//             `⏳ *Fecha estimada de entrega:* ${moment()
+//               .add(extras.length > 0 ? 21 : 14, 'days')
+//               .format('DD/MM/YYYY')}\n\n` +
+//             `💡 *Prepárate:*\n` +
+//             `• Reúne imágenes de productos\n` +
+//             `• Piensa en tus colores favoritos\n` +
+//             `• Ten a mano tus datos fiscales\n\n` +
+//             `¿Alguna otra pregunta antes de finalizar?`
+//         );
+//         delete conversationStates[phone];
+//       } else if (text.includes('ajustar')) {
+//         await msg.reply(
+//           `🔧 *¿Qué necesitas ajustar?*\n\n` +
+//             `1. Agregar más productos\n` +
+//             `2. Incluir métodos de pago adicionales\n` +
+//             `3. Necesito diseño personalizado\n` +
+//             `4. Otro (especificar)\n\n` +
+//             `Responde con el número o descripción`
+//         );
+//         conv.state = 'ecommerce_adjustments';
+//       } else {
+//         await msg.reply(`Por favor confirma con *CONFIRMAR* o solicita cambios con *AJUSTAR*`);
+//       }
+//       return;
+//     }
+
+//     // Manejo de otros estados del flujo de presupuesto...
+//   }
+
+//   async handleAppointmentFlow(msg, conv, phone, text, incomingText) {
+//     conv.lastInteraction = new Date();
+
+//     if (conv.state === 'waiting_for_name') {
+//       if (incomingText.length < 3) {
+//         await msg.reply('El nombre parece muy corto. Por favor ingresa tu nombre completo:');
+//         return;
+//       }
+//       conv.name = incomingText;
+//       conv.state = 'waiting_for_email';
+//       await msg.reply(`Gracias ${incomingText}. Ahora necesito tu email para la confirmación:`);
+//       return;
+//     }
+
+//     if (conv.state === 'waiting_for_email') {
+//       if (!incomingText.includes('@') || !incomingText.includes('.')) {
+//         await msg.reply('El email no parece válido. Por favor ingresa un email correcto:');
+//         return;
+//       }
+//       conv.email = incomingText;
+//       conv.state = 'waiting_for_datetime';
+//       await msg.reply(
+//         `Perfecto. Ahora indícame la fecha y hora para la cita:\n\n` +
+//           `Puedes usar formatos como:\n` +
+//           `• "15/03 a las 3pm"\n` +
+//           `• "2025-03-15 15:00"\n` +
+//           `• "próximo lunes a las 10"\n\n` +
+//           `💡 Horario de atención: Lunes a Viernes 9am - 6pm`
+//       );
+//       return;
+//     }
+
+//     if (conv.state === 'waiting_for_datetime') {
+//       const dateTime = this.parseDateTime(incomingText);
+//       if (!dateTime || !dateTime.isValid()) {
+//         await msg.reply(
+//           `No pude entender la fecha/hora. Por favor usa formatos como:\n` +
+//             `• "15/03 a las 3pm"\n` +
+//             `• "2025-03-15 15:00"\n` +
+//             `• "próximo lunes a las 10"`
+//         );
+//         return;
+//       }
+
+//       // Validar horario laboral
+//       if (
+//         dateTime.hour() < 9 ||
+//         dateTime.hour() >= 18 ||
+//         dateTime.day() === 0 ||
+//         dateTime.day() === 6
+//       ) {
+//         await msg.reply(
+//           `⚠️ Solo agendamos citas de Lunes a Viernes entre 9am y 6pm.\n` +
+//             `Por favor elige otro horario:`
+//         );
+//         return;
+//       }
+
+//       conv.dateTime = dateTime;
+//       conv.state = 'waiting_for_confirmation';
+//       await msg.reply(
+//         `¿Confirmas la cita para el ${dateTime.format('dddd D [de] MMMM [a las] HH:mm')}?\n\n` +
+//           `Responde *CONFIRMAR* para agendar o *CAMBIO* para modificar.`
+//       );
+//       return;
+//     }
+
+//     if (conv.state === 'waiting_for_confirmation') {
+//       if (text.includes('confirmar') || text === 'si') {
+//         try {
+//           const event = {
+//             summary: `Cita con ${conv.name}`,
+//             description: `Contacto: ${conv.email}\nAgendado por WhatsApp`,
+//             start: {
+//               dateTime: conv.dateTime.toISOString(),
+//               timeZone: 'America/Mexico_City',
+//             },
+//             end: {
+//               dateTime: conv.dateTime.clone().add(1, 'hour').toISOString(),
+//               timeZone: 'America/Mexico_City',
+//             },
+//             reminders: {
+//               useDefault: false,
+//               overrides: [
+//                 { method: 'email', minutes: 24 * 60 },
+//                 { method: 'popup', minutes: 30 },
+//               ],
+//             },
+//           };
+
+//           const eventResponse = await calendar.events.insert({
+//             calendarId: 'primary',
+//             resource: event,
+//           });
+
+//           await msg.reply(
+//             `✅ *¡CITA AGENDADA CON ÉXITO!*\n\n` +
+//               `📅 *Fecha:* ${conv.dateTime.format('dddd D [de] MMMM')}\n` +
+//               `⏰ *Hora:* ${conv.dateTime.format('HH:mm')}\n\n` +
+//               `📩 Recibirás un correo de confirmación con los detalles.\n` +
+//               `🔔 Te avisaremos 1 día y 30 minutos antes.\n\n` +
+//               `¿Necesitas algo más?`
+//           );
+//           delete conversationStates[phone];
+//         } catch (error) {
+//           console.error('Error al agendar cita:', error);
+//           await msg.reply(
+//             `⚠️ Hubo un error al agendar tu cita. Por favor intenta nuevamente o contáctanos directamente.`
+//           );
+//         }
+//       } else {
+//         conv.state = 'waiting_for_datetime';
+//         await msg.reply(`Indícame la nueva fecha y hora que prefieras:`);
+//       }
+//       return;
+//     }
+//   }
+
+//   parseDateTime(text) {
+//     // Implementación de parser de fecha/hora
+//     // ...
+//   }
+
+//   async showHelp(msg) {
+//     await msg.reply(
+//       `🆘 *CENTRO DE AYUDA*\n\n` +
+//         `Puedes usar estos comandos:\n\n` +
+//         `• *menu* - Ver opciones principales\n` +
+//         `• *presupuesto* - Solicitar cotización\n` +
+//         `• *agendar* - Programar una cita\n` +
+//         `• *cancelar* - Detener acción actual\n` +
+//         `• *reiniciar* - Comenzar desde cero\n\n` +
+//         `¿En qué más puedo ayudarte?`
+//     );
+//   }
+
+//   async cancelOperation(msg, phone) {
+//     delete conversationStates[phone];
+//     await msg.reply(
+//       `Operación cancelada. ¿En qué más puedo ayudarte? Escribe *MENU* para ver opciones.`
+//     );
+//   }
+
+//   async resetConversation(msg, phone) {
+//     delete conversationStates[phone];
+//     await msg.reply(`Conversación reiniciada. ¿Cómo puedo ayudarte hoy?`);
+//     await this.showMainMenu(msg);
+//   }
+
+//   async greetUser(msg) {
+//     await msg.reply(`¡Hola! 👋 ¿En qué puedo ayudarte hoy? Escribe *MENU* para ver opciones.`);
+//   }
+
+//   async getClientStatus() {
+//     if (this.isReady) return { status: 204 };
+//     if (this.lastQR) {
+//       const qrCodeDataURL = await QRCode.toDataURL(this.lastQR);
+//       return { status: 200, qr: qrCodeDataURL };
+//     }
+//     return { status: 200, qr: null, message: 'Esperando conexión' };
+//   }
+
+//   async sendMessage(phoneNumber, message) {
+//     try {
+//       if (!this.isReady) {
+//         console.error('Cliente no está listo');
+//         return false;
+//       }
+
+//       const numberId = await this.client.getNumberId(phoneNumber.replace('+', ''));
+//       if (!numberId) {
+//         console.error('Número no registrado en WhatsApp:', phoneNumber);
+//         return false;
+//       }
+
+//       await this.client.sendMessage(numberId._serialized, message);
+//       console.log(`Mensaje enviado a ${phoneNumber}`);
+//       return true;
+//     } catch (error) {
+//       console.error('Error al enviar mensaje:', error);
+//       return false;
+//     }
+//   }
+// }
+
+// const whatsappService = new WhatsAppService();
+// module.exports = whatsappService;
+src/test/crearCitas.js:
+require('dotenv').config({ path: '.env.test' }); // Cargar variables de entorno de test
+const request = require('supertest');
+const mongoose = require('mongoose');
+const { MongoMemoryServer } = require('mongodb-memory-server');
+const app = require('../app'); // Importar la app sin levantar el servidor
+const Client = require('../models/Cliente');
+
+let mongoServer;
+
+beforeAll(async () => {
+  // Iniciar MongoDB en memoria
+  mongoServer = await MongoMemoryServer.create();
+  const mongoUri = mongoServer.getUri();
+  await mongoose.connect(mongoUri, { useNewUrlParser: true, useUnifiedTopology: true });
+});
+
+afterAll(async () => {
+  await mongoose.disconnect();
+  await mongoServer.stop();
+});
+
+describe('POST /citas/create', () => {
+  beforeEach(async () => {
+    await Client.deleteMany();
+  });
+
+  it('Debe crear una cita correctamente', async () => {
+    const response = await request(app).post('/citas/create').send({
+      name: 'Juan Pérez',
+      email: 'juanmartinarrayago@gmail.com',
+      phoneNumber: '+542241563807',
+      message:
+        'Este es un mensaje de prueba que supera los 200 caracteres. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla condimentum tortor eu libero hendrerit, a suscipit dui maximus. Integer nec neque ipsum.Este es un mensaje de prueba que supera los 200 caracteres. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla condimentum tortor eu libero hendrerit, a suscipit dui maximus. Integer nec neque ipsum.Este es un mensaje de prueba que supera los 200 caracteres. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla condimentum tortor eu libero hendrerit, a suscipit dui maximus. Integer nec neque ipsum.Este es un mensaje de prueba que supera los 200 caracteres. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla condimentum tortor eu libero hendrerit, a suscipit dui maximus. Integer nec neque ipsum.Este es un mensaje de prueba que supera los 200 caracteres. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla condimentum tortor eu libero hendrerit, a suscipit dui maximus. Integer nec neque ipsum.',
+      dia: 'Lunes',
+      hora: '10:00',
+      fecha: '2025-01-01',
+      agendarEnGoogle: false,
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body).toHaveProperty('success', true);
+    expect(response.body).toHaveProperty('message', 'Cita creada correctamente');
+
+    const client = await Client.findOne({ email: 'juanmartinarrayago@gmail.com' });
+    expect(client).not.toBeNull();
+    expect(client.name).toBe('Juan Pérez');
+  });
+
+  it('Debe fallar si falta algún campo obligatorio', async () => {
+    const response = await request(app).post('/citas/create').send({
+      name: 'Juan Pérez',
+      email: 'juanmartinarrayago@gmail.com',
+      phoneNumber: '+542241563807',
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toHaveProperty('message', 'Todos los campos son obligatorios');
+  });
+
+  it('Debe fallar si el email es inválido', async () => {
+    const response = await request(app).post('/citas/create').send({
+      name: 'Juan Pérez',
+      email: 'abc123',
+      phoneNumber: '+542241563807',
+      message:
+        'Mensaje válido con más de 200 caracteres. Lorem ipsum dolor sit amet, consectetur adipiscing elit.Este es un mensaje de prueba que supera los 200 caracteres. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla condimentum tortor eu libero hendrerit, a suscipit dui maximus. Integer nec neque ipsum.Este es un mensaje de prueba que supera los 200 caracteres. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla condimentum tortor eu libero hendrerit, a suscipit dui maximus. Integer nec neque ipsum.Este es un mensaje de prueba que supera los 200 caracteres. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla condimentum tortor eu libero hendrerit, a suscipit dui maximus. Integer nec neque ipsum.',
+      dia: 'Lunes',
+      hora: '10:00',
+      fecha: '2025-01-01',
+      agendarEnGoogle: false,
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toHaveProperty('message', 'El email no es válido');
+  });
+
+  it('Debe fallar si el número de teléfono es inválido', async () => {
+    const response = await request(app).post('/citas/create').send({
+      name: 'Juan Pérez',
+      email: 'juanmartinarrayago@gmail.com',
+      phoneNumber: '5492241563807',
+      message:
+        'Mensaje válido con más de 200 caracteres. Lorem ipsum dolor sit amet, consectetur adipiscing elit.Este es un mensaje de prueba que supera los 200 caracteres. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla condimentum tortor eu libero hendrerit, a suscipit dui maximus. Integer nec neque ipsum.Este es un mensaje de prueba que supera los 200 caracteres. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla condimentum tortor eu libero hendrerit, a suscipit dui maximus. Integer nec neque ipsum.Este es un mensaje de prueba que supera los 200 caracteres. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla condimentum tortor eu libero hendrerit, a suscipit dui maximus. Integer nec neque ipsum.Este es un mensaje de prueba que supera los 200 caracteres. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Nulla condimentum tortor eu libero hendrerit, a suscipit dui maximus. Integer nec neque ipsum.',
+      dia: 'Lunes',
+      hora: '10:00',
+      fecha: '2025-01-01',
+      agendarEnGoogle: false,
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toHaveProperty('message', 'El número de teléfono no es válido');
+  });
+
+  it('Debe fallar si el mensaje tiene menos de 200 caracteres', async () => {
+    const response = await request(app).post('/citas/create').send({
+      name: 'Juan Pérez',
+      email: 'juanmartinarrayago@gmail.com',
+      phoneNumber: '+5492241563807',
+      message: 'Mensaje corto',
+      dia: 'Lunes',
+      hora: '10:00',
+      fecha: '2025-01-01',
+      agendarEnGoogle: false,
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body).toHaveProperty(
+      'message',
+      'El mensaje debe tener al menos 200 caracteres'
+    );
+  });
+});
+

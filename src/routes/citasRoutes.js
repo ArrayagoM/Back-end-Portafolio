@@ -1,8 +1,8 @@
 const { Router } = require('express');
 const { crearCita } = require('../controllers/ClientsController');
 
-const route = Router();
+const router = Router();
 
-route.post('/create', crearCita);
+router.post('/create', crearCita);
 
-module.exports = route;
+module.exports = router;
