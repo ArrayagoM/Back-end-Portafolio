@@ -28,10 +28,13 @@ app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// CORS unificado — una sola configuración
+// CORS — se elimina la barra final por si está mal configurada en Vercel
+const rawOrigin = process.env.FRONTEND_URL || '*';
+const allowedOrigin = rawOrigin === '*' ? '*' : rawOrigin.replace(/\/$/, '');
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || '*',
+    origin: allowedOrigin,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
