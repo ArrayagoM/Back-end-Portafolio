@@ -21,6 +21,9 @@ const isLocal = (o) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(o);
 // Defaults del entorno (no pisan lo que ya esté definido en Vercel)
 process.env.PUBLIC_DEMO = process.env.PUBLIC_DEMO ?? '1';
 process.env.TRUST_PROXY = process.env.TRUST_PROXY ?? 'all';
+// Ritmo entre pasos (ms): el original (700) es para mirar la oficina en una PC; en serverless el trabajo solo avanza mientras
+// haya una conexión abierta (límite de duración), así que se acelera para que la entrega termine en ~1 minuto.
+process.env.PACE = process.env.PACE ?? (process.env.VERCEL ? '150' : '700');
 process.env.DATA_DIR = process.env.DATA_DIR ?? (process.env.VERCEL ? '/tmp/agencia-data' : require('path').join(process.cwd(), 'tmp', 'agencia-data'));
 
 let serverPromise = null;
