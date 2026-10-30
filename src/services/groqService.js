@@ -90,7 +90,7 @@ async function chat(messages, options = {}) {
   const systemPrompt = await buildSystemPrompt();
 
   const completion = await groq.chat.completions.create({
-    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
     messages: [{ role: 'system', content: systemPrompt }, ...messages],
     temperature: options.temperature ?? 0.7,
     max_tokens: options.maxTokens ?? 1200,
@@ -141,7 +141,7 @@ ${requirements.length ? `**Requisitos específicos mencionados:**\n${requirement
 `;
 
   const completion = await groq.chat.completions.create({
-    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: budgetRequest },
@@ -179,7 +179,7 @@ Responde en JSON con este formato:
 }`;
 
   const completion = await groq.chat.completions.create({
-    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+    model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: analysisRequest },
