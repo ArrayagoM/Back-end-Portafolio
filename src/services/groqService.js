@@ -3,6 +3,25 @@ const Proyect = require('../models/Proyect');
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
+// Groq da de baja modelos con el tiempo. Si el configurado (GROQ_MODEL) ya no existe, se reintenta con estos, en orden.
+const FALLBACK_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.1-8b-instant'];
+const isGone = (e) => e && (e.status === 404 || e.status === 400 || e.error?.error?.code === 'model_not_found' || /model_not_found|decommissioned|does not exist/i.test(String(e.message)));
+
+async function createCompletion(params) {
+  const models = [...new Set([process.env.GROQ_MODEL, ...FALLBACK_MODELS].filter(Boolean))];
+  let lastErr;
+  for (const model of models) {
+    try {
+      return await groq.chat.completions.create({ ...params, model });
+    } catch (e) {
+      lastErr = e;
+      if (!isGone(e)) throw e;
+      console.warn(`[Groq] modelo no disponible (${model}); probando el siguiente`);
+    }
+  }
+  throw lastErr;
+}
+
 // ─── Prompt base del asistente ───────────────────────────────────────────────
 const BASE_SYSTEM_PROMPT = `Eres el asistente de inteligencia artificial de TinchoDev, un desarrollador full-stack argentino especializado en aplicaciones web modernas, APIs REST, integraciones con servicios externos y soluciones digitales a medida.
 
@@ -89,8 +108,7 @@ ${projectsContext}
 async function chat(messages, options = {}) {
   const systemPrompt = await buildSystemPrompt();
 
-  const completion = await groq.chat.completions.create({
-    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+  const completion = await createCompletion({
     messages: [{ role: 'system', content: systemPrompt }, ...messages],
     temperature: options.temperature ?? 0.7,
     max_tokens: options.maxTokens ?? 1200,
@@ -140,8 +158,7 @@ ${description}
 ${requirements.length ? `**Requisitos específicos mencionados:**\n${requirements.map((r) => `- ${r}`).join('\n')}` : ''}
 `;
 
-  const completion = await groq.chat.completions.create({
-    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+  const completion = await createCompletion({
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: budgetRequest },
@@ -178,8 +195,7 @@ Responde en JSON con este formato:
   "estimatedRange": "$X – $X USD"
 }`;
 
-  const completion = await groq.chat.completions.create({
-    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+  const completion = await createCompletion({
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: analysisRequest },

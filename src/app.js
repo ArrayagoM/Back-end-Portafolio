@@ -6,6 +6,7 @@ const cookieParser = require('cookie-parser');
 const googleAuthRoutes = require('./routes/googleAuth');
 const { getAuthUrl, saveRefreshToken } = require('./services/googleOAuthService');
 const routes = require('./routes/index');
+const agenciaRoutes = require('./routes/agenciaRoutes');
 
 const app = express();
 app.name = 'API TinchoDev';
@@ -24,17 +25,26 @@ if (!GROQ_API_KEY) {
 
 // ─── Middlewares globales ─────────────────────────────────────────────────────
 app.use(morgan('dev'));
+
+// Agencia IA (/agencia/*): trae su propio parseo y CORS, por eso va antes de express.json()
+app.use('/agencia', agenciaRoutes);
+
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// CORS — se elimina la barra final por si está mal configurada en Vercel
+// CORS — FRONTEND_URL admite varios orígenes separados por coma; siempre se permiten los dominios propios
+const DEFAULT_ORIGINS = ['https://tinchodev.it.com', 'https://www.tinchodev.it.com', 'https://martinarrayago.lat', 'https://www.martinarrayago.lat'];
 const rawOrigin = process.env.FRONTEND_URL || '*';
-const allowedOrigin = rawOrigin === '*' ? '*' : rawOrigin.replace(/\/$/, '');
+const allowedList = rawOrigin === '*'
+  ? null
+  : [...new Set([...DEFAULT_ORIGINS, ...rawOrigin.split(',').map((o) => o.trim().replace(/\/$/, '')).filter(Boolean)])];
 
 app.use(
   cors({
-    origin: allowedOrigin,
+    origin: allowedList
+      ? (origin, cb) => cb(null, !origin || allowedList.includes(origin.replace(/\/$/, '')) || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin))
+      : '*',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -52,6 +62,7 @@ app.get('/', (req, res) => {
       proyectos: '/api/proyect',
       reviews: '/api/review',
       ai: '/api/ai',
+      agencia: '/agencia/api/llm',
       google: '/google/auth',
     },
   });
