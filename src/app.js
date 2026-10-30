@@ -34,7 +34,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // CORS — FRONTEND_URL admite varios orígenes separados por coma; siempre se permiten los dominios propios
-const DEFAULT_ORIGINS = ['https://tinchodev.it.com', 'https://www.tinchodev.it.com', 'https://martinarrayago.lat', 'https://www.martinarrayago.lat'];
+const DEFAULT_ORIGINS = ['https://new-protfolio-xi.vercel.app', 'https://tinchodev.it.com', 'https://www.tinchodev.it.com', 'https://martinarrayago.lat', 'https://www.martinarrayago.lat'];
 const rawOrigin = process.env.FRONTEND_URL || '*';
 const allowedList = rawOrigin === '*'
   ? null
@@ -43,7 +43,7 @@ const allowedList = rawOrigin === '*'
 app.use(
   cors({
     origin: allowedList
-      ? (origin, cb) => cb(null, !origin || allowedList.includes(origin.replace(/\/$/, '')) || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin))
+      ? (origin, cb) => cb(null, !origin || allowedList.includes(origin.replace(/\/$/, '')) || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) || /^https:\/\/new-protfolio[\w-]*\.vercel\.app$/.test(origin))
       : '*',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],

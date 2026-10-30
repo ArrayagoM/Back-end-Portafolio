@@ -9,14 +9,14 @@ const { Router } = require('express');
 
 const router = Router();
 
-const DEFAULT_ORIGINS = ['https://tinchodev.it.com', 'https://www.tinchodev.it.com', 'https://martinarrayago.lat', 'https://www.martinarrayago.lat'];
+const DEFAULT_ORIGINS = ['https://new-protfolio-xi.vercel.app', 'https://tinchodev.it.com', 'https://www.tinchodev.it.com', 'https://martinarrayago.lat', 'https://www.martinarrayago.lat'];
 const origins = () =>
   new Set(
     [...DEFAULT_ORIGINS, ...String(process.env.AGENCIA_ALLOWED_ORIGINS || process.env.FRONTEND_URL || '').split(',')]
       .map((s) => s.trim().replace(/\/+$/, ''))
       .filter(Boolean)
   );
-const isLocal = (o) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(o);
+const isLocal = (o) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(o) || /^https:\/\/new-protfolio[\w-]*\.vercel\.app$/i.test(o);
 
 // Defaults del entorno (no pisan lo que ya esté definido en Vercel)
 process.env.PUBLIC_DEMO = process.env.PUBLIC_DEMO ?? '1';
